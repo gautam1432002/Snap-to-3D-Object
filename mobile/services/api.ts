@@ -2,11 +2,9 @@
  * mobile/services/api.ts
  * ──────────────────────
  * Client API for Foldly FastAPI backend:
- * - Runtime-configurable server URL persisted in AsyncStorage (with env fallback)
- * - React Native FormData upload (no manual Content-Type so boundary sets cleanly)
- * - Explicit error reporting on real photos (never hides backend failure behind demo mode)
- * - /assets inline base64 + contour_json fetcher
- * - Strict ContourPoint ({x, y}) normalization matching FastAPI Pydantic schemas
+ * - JSON base64 upload (`POST /api/v1/projects/scan-base64`) avoiding Android FormDataPart crashes
+ * - Runtime-configurable server URL persisted in AsyncStorage
+ * - Strict ContourPoint ({x, y}) normalization & full-res /assets base64 delivery
  */
 
 import { Platform } from 'react-native';
@@ -57,32 +55,6 @@ export interface ContourResultDto {
   perimeter_mm: number;
   edge_color_hex: string;
   smoothness: string;
-}
-
-export interface ProjectResponse {
-  project_id: string;
-  device_id: string;
-  original_filename: string;
-  status: string;
-  stage: string;
-  object_name: string;
-  category: string;
-  suggested_name: string;
-  complexity: string;
-  paper_size: string;
-  estimated_height_cm: number;
-  dominant_colors: string[];
-  quality_metrics?: QualityMetricsDto | null;
-  contour?: ContourResultDto | null;
-  engine_used?: string | null;
-  ai_source?: string | null;
-  ai_warning?: string | null;
-  preview_url?: string | null;
-  trimmed_url?: string | null;
-  polished_url?: string | null;
-  sheet_url?: string | null;
-  created_at?: string;
-  updated_at?: string;
 }
 
 export interface ProjectAssetsResponse {
@@ -141,23 +113,15 @@ export const DEMO_SAMPLES: CreationItem[] = Object.values(SAMPLE_TEMPLATES).map(
   category: s.category,
   status: 'Ready',
   buildStep: 0,
-  totalSteps: 7,
-  moldStyle: s.moldStyle,
+  totalSteps: 5,
   heightCm: s.heightCm,
   depthCm: s.depthCm,
-  smoothness: 'Medium',
   includeStand: s.suggestStand,
   edgeColorHex: s.edgeColorHex,
   difficulty: s.difficulty,
   estMinutes: s.estMinutes,
   buildTip: s.buildTip,
   updatedAt: Date.now(),
-  qualityMetrics: {
-    solidity: 0.94,
-    sharpness: 96,
-    cropEdgeQuality: 1.0,
-    pixelCoverage: 0.58,
-  },
   contour: {
     points: s.contour,
     perimeterMm: 520,
@@ -182,51 +146,6 @@ export function resolveApiUrl(
   const base = (baseOverride || cachedApiBaseUrl).replace(/\/+$/, '');
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${base}${cleanPath}`;
-}
-
-export function mapProjectToCreationItem(p: ProjectResponse): CreationItem {
-  const statusMap: Record<string, 'Ready' | 'Building' | 'Built'> = {
-    ready: 'Ready',
-    processing: 'Building',
-    built: 'Built',
-  };
-
-  return {
-    id: p.project_id,
-    name: p.suggested_name || p.object_name || 'Custom Craft',
-    category: p.category || 'Everyday',
-    status: statusMap[p.status.toLowerCase()] || 'Ready',
-    buildStep: 0,
-    totalSteps: 7,
-    moldStyle: 'block',
-    heightCm: p.estimated_height_cm || 18,
-    depthCm: 2.5,
-    edgeColorHex: p.contour?.edge_color_hex || p.dominant_colors?.[0] || '#2EC4B6',
-    engineUsed: p.engine_used,
-    aiSource: p.ai_source,
-    aiWarning: p.ai_warning,
-    previewUrl: resolveApiUrl(p.preview_url),
-    trimmedUrl: resolveApiUrl(p.trimmed_url),
-    polishedUrl: resolveApiUrl(p.polished_url),
-    sheetUrl: resolveApiUrl(p.sheet_url),
-    updatedAt: p.updated_at ? new Date(p.updated_at).getTime() : Date.now(),
-    qualityMetrics: p.quality_metrics
-      ? {
-        solidity: p.quality_metrics.solidity ?? 0.85,
-        sharpness: p.quality_metrics.sharpness ?? 90.0,
-        cropEdgeQuality: p.quality_metrics.crop_edge_quality ?? 0.95,
-        pixelCoverage: p.quality_metrics.pixel_coverage ?? 0.5,
-      }
-      : undefined,
-    contour: p.contour
-      ? {
-        points: normalizeContourPoints(p.contour.points),
-        perimeterMm: p.contour.perimeter_mm || 0,
-        edgeColorHex: p.contour.edge_color_hex || '#2EC4B6',
-        smoothness: p.contour.smoothness || 'Medium',
-      }
-      : undefined,
-  };
 }
 
 export async function fetchImageAsBase64(
@@ -273,7 +192,9 @@ export async function fetchImageAsBase64(
 export async function checkBackendHealth(
   customUrl?: string
 ): Promise<{ ok: boolean; statusText: string; url: string }> {
-  const targetUrl = (customUrl ? customUrl.trim().replace(/\/+$/, '') : await getActiveApiBaseUrl());
+  const targetUrl = customUrl
+    ? customUrl.trim().replace(/\/+$/, '')
+    : await getActiveApiBaseUrl();
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -297,33 +218,31 @@ export async function checkBackendHealth(
   }
 }
 
-export async function uploadScan(
-  fileUri: string,
+/**
+ * JSON base64 scan upload (`POST /api/v1/projects/scan-base64`) avoiding Android FormDataPart bugs.
+ */
+export async function uploadScanBase64(
+  imageBase64: string,
   mimeType: string = 'image/jpeg',
   filename: string = 'scan.jpg'
 ): Promise<{ project_id: string; job_id: string; status: string }> {
   const baseUrl = await getActiveApiBaseUrl();
   const deviceId = await getOrCreateDeviceId();
-
-  const formData = new FormData();
-  formData.append('file', {
-    uri: fileUri,
-    type: mimeType,
-    name: filename,
-  } as any);
-
-  const target = `${baseUrl}/api/v1/projects/scan`;
-  console.log(`[API] Uploading scan to ${target}`);
+  const target = `${baseUrl}/api/v1/projects/scan-base64`;
 
   let res: Response;
   try {
-    // NEVER manually set Content-Type on FormData fetch so RN attaches the boundary
     res = await fetch(target, {
       method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         'X-Device-ID': deviceId,
       },
-      body: formData,
+      body: JSON.stringify({
+        image_base64: imageBase64,
+        mime_type: mimeType,
+        filename,
+      }),
     });
   } catch (networkErr: any) {
     throw new Error(
@@ -333,12 +252,11 @@ export async function uploadScan(
 
   const rawBody = await res.text();
   if (!res.ok) {
-    console.warn(`[API] Upload error HTTP ${res.status}: ${rawBody}`);
     let detail = rawBody;
     try {
       const parsed = JSON.parse(rawBody);
       if (parsed.detail) detail = parsed.detail;
-    } catch { }
+    } catch {}
     throw new Error(`Server ${baseUrl} returned HTTP ${res.status}: ${detail}`);
   }
 
@@ -362,10 +280,10 @@ export async function pollJobUntilDone(
 ): Promise<JobStatusResponse> {
   const stageDescriptions: Record<string, string> = {
     uploaded: 'Photo received, queuing AI pipeline...',
-    segmentation: 'Isolating subject edge-by-edge (RMBG / GrabCut)...',
-    contour: 'Tracing vector silhouette contour...',
-    metadata: 'Identifying object & craft parameters with Gemini...',
-    done: 'Subject lifted cleanly!',
+    segmentation: 'Lifting crisp subject cutout...',
+    contour: 'Tracing sharp vector outline...',
+    metadata: 'Identifying object with Gemini...',
+    done: 'Subject cutout ready!',
     failed: 'Segmentation pipeline failed.',
   };
 

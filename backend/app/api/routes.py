@@ -36,6 +36,7 @@ from app.db.database import (
     update_project,
 )
 from app.models.schemas import (
+    Base64ScanRequest,
     ContourResult,
     JobStatusResponse,
     MaskUpdateResponse,
@@ -231,6 +232,85 @@ async def scan_upload(
             "project_id": project_id,
             "device_id": x_device_id,
             "original_filename": file.filename or "upload.jpg",
+            "original_path": str(original_path),
+            "status": "queued",
+            "stage": "uploaded",
+        },
+    )
+    await create_job(db, job_id, project_id)
+    background_tasks.add_task(_run_scan_pipeline, project_id, job_id, original_path)
+
+    return ScanResponse(project_id=project_id, job_id=job_id, status="queued")
+
+
+@router.post(
+    "/api/v1/projects/scan-base64",
+    response_model=ScanResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["scan"],
+)
+async def scan_upload_base64(
+    payload: Base64ScanRequest,
+    background_tasks: BackgroundTasks,
+    x_device_id: str = Header(..., alias="X-Device-ID"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """
+    JSON base64 upload endpoint avoiding Android React Native FormDataPart crashes.
+    """
+    settings = get_settings()
+    raw_b64 = payload.image_base64.strip()
+    mime_type = payload.mime_type or "image/jpeg"
+
+    if raw_b64.startswith("data:") and "," in raw_b64:
+        header_part, raw_b64 = raw_b64.split(",", 1)
+        if ";" in header_part:
+            parsed_mime = header_part[5:].split(";", 1)[0].strip().lower()
+            if parsed_mime:
+                mime_type = parsed_mime
+
+    if mime_type not in ALLOWED_MIMES:
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail=f"Unsupported format '{mime_type}'. Must be JPEG, PNG, or WebP.",
+        )
+
+    try:
+        contents = base64.b64decode(raw_b64, validate=True)
+    except Exception:
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail="Invalid base64 image payload.",
+        )
+
+    if len(contents) == 0:
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
+            detail="Decoded image payload is empty.",
+        )
+
+    if len(contents) > settings.MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413),
+            detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+
+    project_id = str(uuid.uuid4())
+    job_id = str(uuid.uuid4())
+    project_dir = settings.STORAGE_PATH / project_id
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    ext_map = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+    ext = Path(payload.filename or "scan.jpg").suffix or ext_map.get(mime_type, ".jpg")
+    original_path = project_dir / f"original{ext}"
+    original_path.write_bytes(contents)
+
+    await create_project(
+        db,
+        {
+            "project_id": project_id,
+            "device_id": x_device_id,
+            "original_filename": payload.filename or f"scan{ext}",
             "original_path": str(original_path),
             "status": "queued",
             "stage": "uploaded",

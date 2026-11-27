@@ -11,7 +11,8 @@ import {
 import { BottomTabBarProps } from 'expo-router/tabs';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Home, Compass, Layers, User } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Home, Layers, Settings } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
 interface TabItemConfig {
@@ -27,23 +28,19 @@ const TABS: TabItemConfig[] = [
     icon: (c) => <Home size={20} color={c} strokeWidth={2.2} />,
   },
   {
-    name: 'explore',
-    label: 'Explore',
-    icon: (c) => <Compass size={20} color={c} strokeWidth={2.2} />,
-  },
-  {
     name: 'creations',
     label: 'Creations',
     icon: (c) => <Layers size={20} color={c} strokeWidth={2.2} />,
   },
   {
-    name: 'profile',
-    label: 'Profile',
-    icon: (c) => <User size={20} color={c} strokeWidth={2.2} />,
+    name: 'settings',
+    label: 'Settings',
+    icon: (c) => <Settings size={20} color={c} strokeWidth={2.2} />,
   },
 ];
 
 export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
+  const insets = useSafeAreaInsets();
   const [rowWidth, setRowWidth] = useState<number>(0);
   const indicatorX = useRef(new Animated.Value(0)).current;
 
@@ -73,7 +70,13 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
   };
 
   return (
-    <View style={styles.floatingContainer} pointerEvents="box-none">
+    <View
+      style={[
+        styles.floatingContainer,
+        { bottom: Math.max(insets.bottom, 10) + 6 },
+      ]}
+      pointerEvents="box-none"
+    >
       <View style={styles.glassWrapper}>
         <BlurView
           intensity={Platform.OS === 'ios' ? 45 : 32}
@@ -159,9 +162,8 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
 const styles = StyleSheet.create({
   floatingContainer: {
     position: 'absolute',
-    bottom: 14,
-    left: 13,
-    right: 13,
+    left: 16,
+    right: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -207,7 +209,7 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   tabLabel: {
-    fontSize: 10.5,
+    fontSize: 11,
     letterSpacing: 0.2,
   },
   activeTabLabel: {

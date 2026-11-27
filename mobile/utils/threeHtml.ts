@@ -1,28 +1,23 @@
 import { ContourPoint } from './sampleTemplates';
 
-export interface ThreeModelPayload {
+export interface Studio3DPayload {
   imageUri: string;
   contour: ContourPoint[];
   edgeColorHex: string;
   heightCm: number;
   depthCm: number;
-  moldStyle: 'block' | 'standee';
   includeStand: boolean;
+  unfoldProgress: number; // 0..100
   spin: boolean;
 }
 
-export interface UnfoldPayload {
-  imageUri: string;
-  edgeColorHex: string;
-  includeStand: boolean;
-  progress: number;
-}
-
 /**
- * Generates self-contained Three.js r128 ExtrudeGeometry HTML for Stage 3 WebView.
- * Accepts live updates via window.updateFoldlyModel(payload) injected from React Native.
+ * Generates self-contained Three.js r128 WebView combining:
+ * 1) Razor-sharp non-puffed ExtrudeGeometry cardstock model (`bevelEnabled: false`,
+ *    mipmaps disabled with LinearFilter + max anisotropy for crystal-clear scanned textures)
+ * 2) Smooth in-place 3D <-> 2D Unfold controlled by `unfoldProgress` (0% -> 100%)
  */
-export function buildThreeModelHtml(initial: ThreeModelPayload): string {
+export function buildStudio3DHtml(initial: Studio3DPayload): string {
   const safeJson = JSON.stringify(initial).replace(/<\/script>/gi, '<\\/script>');
   return `<!DOCTYPE html>
 <html>
@@ -41,10 +36,7 @@ export function buildThreeModelHtml(initial: ThreeModelPayload): string {
     user-select: none;
     font-family: system-ui, -apple-system, sans-serif;
   }
-  #host {
-    width: 100%;
-    height: 100%;
-  }
+  #host { width: 100%; height: 100%; }
   #fallbackMsg {
     display: none;
     position: absolute;
@@ -72,28 +64,32 @@ export function buildThreeModelHtml(initial: ThreeModelPayload): string {
 
   var host = document.getElementById('host');
   var w = window.innerWidth || 340;
-  var h = window.innerHeight || 250;
+  var h = window.innerHeight || 275;
 
   var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 2, 3));
   renderer.setSize(w, h);
   renderer.outputEncoding = THREE.sRGBEncoding;
   host.appendChild(renderer.domElement);
 
+  var maxAniso = renderer.capabilities && renderer.capabilities.getMaxAnisotropy
+    ? renderer.capabilities.getMaxAnisotropy()
+    : 4;
+
   var scene = new THREE.Scene();
   var camera = new THREE.PerspectiveCamera(36, w / h, 0.1, 100);
-  camera.position.set(0, 0.2, 6.2);
+  camera.position.set(0, 0.18, 6.2);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
-  var dir1 = new THREE.DirectionalLight(0xffffff, 0.65);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.08));
+  var dir1 = new THREE.DirectionalLight(0xffffff, 0.55);
   dir1.position.set(3, 5, 6);
   scene.add(dir1);
-  var dir2 = new THREE.DirectionalLight(0xeef6f2, 0.45);
+  var dir2 = new THREE.DirectionalLight(0xeef6f2, 0.4);
   dir2.position.set(-4, 2, -5);
   scene.add(dir2);
 
   var disc = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.75, 1.85, 0.12, 36),
+    new THREE.CylinderGeometry(1.75, 1.85, 0.11, 40),
     new THREE.MeshStandardMaterial({ color: 0x24493e, roughness: 0.85 })
   );
   disc.position.y = -1.62;
@@ -102,14 +98,22 @@ export function buildThreeModelHtml(initial: ThreeModelPayload): string {
   var root = new THREE.Group();
   scene.add(root);
 
+  var extrudeBody = null;
+  var edgeLines = null;
+  var frontPlane = null;
+  var backPlane = null;
+  var standMesh = null;
+  var flatStripMesh = null;
+
+  var modelMetrics = { modelW: 2.0, clampedH: 2.4, depth: 0.35 };
   var rotY = 0.25;
   var rotX = 0.06;
   var dragging = false;
   var lastX = 0, lastY = 0;
 
-  function notifyParent(type) {
+  function notifyParent(type, extra) {
     if (window.ReactNativeWebView) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: type }));
+      window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ type: type }, extra || {})));
     }
   }
 
@@ -146,47 +150,101 @@ export function buildThreeModelHtml(initial: ThreeModelPayload): string {
         ch.material.dispose();
       }
     }
+    extrudeBody = null;
+    edgeLines = null;
+    frontPlane = null;
+    backPlane = null;
+    standMesh = null;
+    flatStripMesh = null;
   }
 
-  function makeCanvasTexture(src, mirror, cb) {
+  function makeSharpTexture(src, mirror, cb) {
     var img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = function() {
-      var cw = Math.max(128, Math.min(512, img.naturalWidth || 420));
-      var ch = Math.max(128, Math.min(512, img.naturalHeight || 420));
+      var nw = img.naturalWidth || 512;
+      var nh = img.naturalHeight || 512;
+      var scale = Math.min(1, 1024 / Math.max(nw, nh));
+      var cw = Math.max(128, Math.round(nw * scale));
+      var ch = Math.max(128, Math.round(nh * scale));
       var c = document.createElement('canvas');
       c.width = cw;
       c.height = ch;
       var ctx = c.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       if (mirror) {
         ctx.translate(cw, 0);
         ctx.scale(-1, 1);
       }
       ctx.drawImage(img, 0, 0, cw, ch);
+
       var tex = new THREE.CanvasTexture(c);
       tex.encoding = THREE.sRGBEncoding;
+      tex.generateMipmaps = false;
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.anisotropy = maxAniso;
       tex.needsUpdate = true;
-      cb(tex, (img.naturalWidth || 420) / Math.max(1, img.naturalHeight || 420));
+      cb(tex, nw / Math.max(1, nh));
     };
-    img.onerror = function() {
-      cb(null, 1.0);
-    };
+    img.onerror = function() { cb(null, 1.0); };
     img.src = src;
   }
 
-  var lastBuiltUri = '';
+  function applyUnfold(pct) {
+    state.unfoldProgress = pct;
+    var t = Math.max(0, Math.min(1, pct / 100));
+    var faceZ = modelMetrics.depth / 2 + 0.008;
+
+    if (extrudeBody) {
+      var foldedVis = t < 0.18;
+      extrudeBody.visible = foldedVis;
+      if (edgeLines) edgeLines.visible = foldedVis;
+      var s = Math.max(0.01, 1 - t * 4);
+      extrudeBody.scale.set(1, 1, s);
+      if (edgeLines) edgeLines.scale.set(1, 1, s);
+    }
+
+    if (frontPlane) {
+      var spread = Math.max(0.95, modelMetrics.modelW * 0.58);
+      frontPlane.position.set(-spread * t, 0.28 * t, faceZ * (1 - t));
+      frontPlane.rotation.y = (1 - t) * 0.0;
+    }
+
+    if (backPlane) {
+      var spreadB = Math.max(0.95, modelMetrics.modelW * 0.58);
+      backPlane.position.set(spreadB * t, 0.28 * t, -faceZ * (1 - t));
+      backPlane.rotation.y = Math.PI * (1 - t);
+    }
+
+    if (flatStripMesh) {
+      flatStripMesh.visible = t >= 0.06;
+      flatStripMesh.position.set(0, -modelMetrics.clampedH * 0.5 * t - 0.32 * t, 0);
+      flatStripMesh.rotation.x = (1 - t) * (Math.PI / 2);
+    }
+
+    if (standMesh) {
+      standMesh.visible = !!state.includeStand;
+      var standY = -modelMetrics.clampedH / 2 - 0.04;
+      standMesh.position.set(0, standY * (1 - t) + (-1.52) * t, 0);
+      standMesh.rotation.x = t * (Math.PI / 2);
+    }
+
+    disc.visible = t < 0.15;
+  }
 
   function rebuildMesh(cfg) {
     state = cfg;
-    makeCanvasTexture(cfg.imageUri, false, function(frontTex, aspect) {
-      makeCanvasTexture(cfg.imageUri, true, function(backTex) {
+    makeSharpTexture(cfg.imageUri, false, function(frontTex, aspect) {
+      makeSharpTexture(cfg.imageUri, true, function(backTex) {
         disposeGroup(root);
-        var modelH = 2.6 * ((cfg.heightCm || 18) / 18);
-        var clampedH = Math.max(1.5, Math.min(3.0, modelH));
+
+        var modelH = 2.55 * ((cfg.heightCm || 18) / 18);
+        var clampedH = Math.max(1.5, Math.min(2.95, modelH));
         var modelW = clampedH * (aspect || 1);
-        var depth = cfg.moldStyle === 'standee'
-          ? 0.14
-          : Math.max(0.22, ((cfg.depthCm || 2.5) / Math.max(10, cfg.heightCm || 18)) * clampedH * 1.45);
+        var depth = Math.max(0.24, ((cfg.depthCm || 2.5) / Math.max(10, cfg.heightCm || 18)) * clampedH * 1.45);
+        modelMetrics = { modelW: modelW, clampedH: clampedH, depth: depth };
 
         var pts = (cfg.contour && cfg.contour.length >= 3)
           ? cfg.contour
@@ -208,256 +266,113 @@ export function buildThreeModelHtml(initial: ThreeModelPayload): string {
         });
         extrudeGeom.translate(0, 0, -depth / 2);
 
-        var sideMat = new THREE.MeshLambertMaterial({
-          color: new THREE.Color(cfg.edgeColorHex || '#2ec4b6')
-        });
-        root.add(new THREE.Mesh(extrudeGeom, sideMat));
+        extrudeBody = new THREE.Mesh(
+          extrudeGeom,
+          new THREE.MeshLambertMaterial({ color: new THREE.Color(cfg.edgeColorHex || '#2ec4b6') })
+        );
+        root.add(extrudeBody);
 
-        var edgesGeom = new THREE.EdgesGeometry(extrudeGeom, 24);
-        var edgeLines = new THREE.LineSegments(
-          edgesGeom,
-          new THREE.LineBasicMaterial({ color: 0x17201d, transparent: true, opacity: 0.5 })
+        edgeLines = new THREE.LineSegments(
+          new THREE.EdgesGeometry(extrudeGeom, 24),
+          new THREE.LineBasicMaterial({ color: 0x17201d, transparent: true, opacity: 0.48 })
         );
         root.add(edgeLines);
 
         var faceZ = depth / 2 + 0.008;
         if (frontTex) {
-          var frontPlane = new THREE.Mesh(
+          frontPlane = new THREE.Mesh(
             new THREE.PlaneGeometry(modelW, clampedH),
-            new THREE.MeshBasicMaterial({ map: frontTex, transparent: true, alphaTest: 0.15 })
+            new THREE.MeshBasicMaterial({ map: frontTex, transparent: true, alphaTest: 0.15, side: THREE.DoubleSide })
           );
           frontPlane.position.z = faceZ;
           root.add(frontPlane);
         }
         if (backTex) {
-          var backPlane = new THREE.Mesh(
+          backPlane = new THREE.Mesh(
             new THREE.PlaneGeometry(modelW, clampedH),
-            new THREE.MeshBasicMaterial({ map: backTex, transparent: true, alphaTest: 0.15 })
+            new THREE.MeshBasicMaterial({ map: backTex, transparent: true, alphaTest: 0.15, side: THREE.DoubleSide })
           );
           backPlane.position.z = -faceZ;
           backPlane.rotation.y = Math.PI;
           root.add(backPlane);
         }
 
-        if (cfg.includeStand) {
-          var standW = Math.max(0.7, modelW * 0.62);
-          var standMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(standW, 0.06, Math.max(0.55, depth + 0.55)),
-            new THREE.MeshLambertMaterial({ color: 0xfdfdfb })
-          );
-          standMesh.position.y = -clampedH / 2 - 0.04;
-          root.add(standMesh);
-        }
-        lastBuiltUri = cfg.imageUri;
+        flatStripMesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(Math.max(2.6, modelW * 1.4), Math.max(0.32, depth * 1.15)),
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(cfg.edgeColorHex || '#2ec4b6'), side: THREE.DoubleSide })
+        );
+        flatStripMesh.visible = false;
+        root.add(flatStripMesh);
+
+        var standW = Math.max(0.75, modelW * 0.62);
+        standMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(standW, 0.06, Math.max(0.55, depth + 0.52)),
+          new THREE.MeshLambertMaterial({ color: 0xfdfdfb })
+        );
+        standMesh.visible = !!cfg.includeStand;
+        root.add(standMesh);
+
+        applyUnfold(cfg.unfoldProgress || 0);
       });
     });
   }
 
-  window.updateFoldlyModel = function(nextCfg) {
-    rebuildMesh(nextCfg);
+  var lastUri = '';
+  var lastContourLen = 0;
+
+  window.updateStudio3D = function(nextCfg) {
+    var needsRebuild =
+      nextCfg.imageUri !== lastUri ||
+      nextCfg.heightCm !== state.heightCm ||
+      nextCfg.edgeColorHex !== state.edgeColorHex ||
+      (nextCfg.contour ? nextCfg.contour.length : 0) !== lastContourLen;
+
+    state.includeStand = !!nextCfg.includeStand;
+    state.spin = !!nextCfg.spin;
+    if (needsRebuild) {
+      lastUri = nextCfg.imageUri;
+      lastContourLen = nextCfg.contour ? nextCfg.contour.length : 0;
+      rebuildMesh(nextCfg);
+    } else {
+      applyUnfold(nextCfg.unfoldProgress || 0);
+    }
   };
-  window.setFoldlySpin = function(spin) {
+
+  window.setStudioSpin = function(spin) {
     state.spin = !!spin;
   };
-  window.flipFoldlyModel = function() {
-    rotY += Math.PI;
-  };
-  window.resetFoldlyCam = function() {
+  window.resetStudioCam = function() {
     rotY = 0.25;
     rotX = 0.06;
   };
 
   window.addEventListener('resize', function() {
     var nw = window.innerWidth || 340;
-    var nh = window.innerHeight || 250;
+    var nh = window.innerHeight || 275;
     camera.aspect = nw / nh;
     camera.updateProjectionMatrix();
     renderer.setSize(nw, nh);
   });
 
+  lastUri = state.imageUri;
+  lastContourLen = state.contour ? state.contour.length : 0;
   rebuildMesh(state);
 
   function animate() {
     requestAnimationFrame(animate);
-    if (state.spin && !dragging) rotY += 0.009;
-    root.rotation.y = rotY;
-    root.rotation.x = rotX;
+    var unfoldT = (state.unfoldProgress || 0) / 100;
+    if (unfoldT <= 0.05) {
+      if (state.spin && !dragging) rotY += 0.008;
+      root.rotation.y = rotY;
+      root.rotation.x = rotX;
+    } else {
+      // Smoothly face viewer squarely as pieces flatten
+      root.rotation.y = rotY * (1 - Math.min(1, unfoldT * 1.5));
+      root.rotation.x = rotX * (1 - Math.min(1, unfoldT * 1.5));
+    }
     renderer.render(scene, camera);
   }
   animate();
-})();
-</script>
-</body>
-</html>`;
-}
-
-/**
- * Generates self-contained Three.js r128 3D-to-2D Unfold HTML for Stage 4 WebView.
- */
-export function buildUnfoldHtml(initial: UnfoldPayload): string {
-  const safeJson = JSON.stringify(initial).replace(/<\/script>/gi, '<\\/script>');
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background: #0d1f1a;
-    touch-action: none;
-    user-select: none;
-  }
-  #host { width: 100%; height: 100%; }
-</style>
-</head>
-<body>
-<div id="host"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
-(function() {
-  var state = ${safeJson};
-  if (typeof THREE === 'undefined') return;
-
-  var host = document.getElementById('host');
-  var w = window.innerWidth || 340;
-  var h = window.innerHeight || 265;
-
-  var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(w, h);
-  renderer.outputEncoding = THREE.sRGBEncoding;
-  host.appendChild(renderer.domElement);
-
-  var scene = new THREE.Scene();
-  var camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 100);
-  camera.position.set(0, 0.3, 6.8);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.95));
-
-  var frontM = null, backM = null, stripM = null, standM = null;
-
-  function makeCanvasTexture(src, mirror, cb) {
-    var img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = function() {
-      var cw = Math.max(128, Math.min(512, img.naturalWidth || 420));
-      var ch = Math.max(128, Math.min(512, img.naturalHeight || 420));
-      var c = document.createElement('canvas');
-      c.width = cw;
-      c.height = ch;
-      var ctx = c.getContext('2d');
-      if (mirror) {
-        ctx.translate(cw, 0);
-        ctx.scale(-1, 1);
-      }
-      ctx.drawImage(img, 0, 0, cw, ch);
-      var tex = new THREE.CanvasTexture(c);
-      tex.encoding = THREE.sRGBEncoding;
-      tex.needsUpdate = true;
-      cb(tex, (img.naturalWidth || 420) / Math.max(1, img.naturalHeight || 420));
-    };
-    img.onerror = function() { cb(null, 1.0); };
-    img.src = src;
-  }
-
-  function applyProgress(pct) {
-    state.progress = pct;
-    var t = Math.max(0, Math.min(1, pct / 100));
-    if (!frontM) return;
-
-    frontM.position.set(-1.15 * t, 0.35 * t, (1 - t) * 0.35);
-    frontM.rotation.y = (1 - t) * 0.35;
-
-    backM.position.set(1.15 * t, 0.35 * t, -(1 - t) * 0.35);
-    backM.rotation.y = Math.PI * (1 - t);
-
-    stripM.position.set(0, -1.05 * t, 0);
-    stripM.rotation.x = (1 - t) * (Math.PI / 2);
-
-    standM.visible = !!state.includeStand;
-    standM.position.set(0, -1.62 * t, 0);
-    standM.rotation.x = (1 - t) * (Math.PI / 2);
-
-    renderer.render(scene, camera);
-  }
-
-  function buildMeshes(cfg) {
-    state = cfg;
-    [frontM, backM, stripM, standM].forEach(function(m) {
-      if (m) {
-        scene.remove(m);
-        if (m.geometry) m.geometry.dispose();
-        if (m.material) m.material.dispose();
-      }
-    });
-
-    makeCanvasTexture(cfg.imageUri, false, function(fTex, aspect) {
-      makeCanvasTexture(cfg.imageUri, true, function(bTex) {
-        var ph = 2.0;
-        var pw = Math.min(2.2, ph * (aspect || 1));
-
-        frontM = new THREE.Mesh(
-          new THREE.PlaneGeometry(pw, ph),
-          new THREE.MeshBasicMaterial({ map: fTex, transparent: true, side: THREE.DoubleSide })
-        );
-        backM = new THREE.Mesh(
-          new THREE.PlaneGeometry(pw, ph),
-          new THREE.MeshBasicMaterial({ map: bTex, transparent: true, side: THREE.DoubleSide })
-        );
-        stripM = new THREE.Mesh(
-          new THREE.PlaneGeometry(3.4, 0.42),
-          new THREE.MeshBasicMaterial({ color: new THREE.Color(cfg.edgeColorHex || '#2ec4b6'), side: THREE.DoubleSide })
-        );
-        standM = new THREE.Mesh(
-          new THREE.PlaneGeometry(1.1, 0.55),
-          new THREE.MeshBasicMaterial({ color: 0xfdfdfb, side: THREE.DoubleSide })
-        );
-
-        scene.add(frontM, backM, stripM, standM);
-        applyProgress(state.progress || 0);
-      });
-    });
-  }
-
-  window.setUnfoldProgress = applyProgress;
-  window.updateUnfoldConfig = function(cfg) {
-    state.includeStand = !!cfg.includeStand;
-    state.edgeColorHex = cfg.edgeColorHex || state.edgeColorHex;
-    if (stripM) stripM.material.color = new THREE.Color(state.edgeColorHex);
-    applyProgress(cfg.progress !== undefined ? cfg.progress : state.progress);
-  };
-
-  var animId = null;
-  window.replayUnfold = function() {
-    if (animId) cancelAnimationFrame(animId);
-    var start = null;
-    function step(ts) {
-      if (!start) start = ts;
-      var t = Math.min(1, (ts - start) / 1400);
-      var eased = 1 - Math.pow(1 - t, 3);
-      applyProgress(eased * 100);
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'progress', value: Math.round(eased * 100) }));
-      }
-      if (t < 1) animId = requestAnimationFrame(step);
-    }
-    animId = requestAnimationFrame(step);
-  };
-
-  window.addEventListener('resize', function() {
-    var nw = window.innerWidth || 340;
-    var nh = window.innerHeight || 265;
-    camera.aspect = nw / nh;
-    camera.updateProjectionMatrix();
-    renderer.setSize(nw, nh);
-    renderer.render(scene, camera);
-  });
-
-  buildMeshes(state);
 })();
 </script>
 </body>

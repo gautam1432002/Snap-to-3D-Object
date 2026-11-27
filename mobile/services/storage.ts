@@ -17,10 +17,8 @@ export interface CreationItem {
   status: 'Ready' | 'Building' | 'Built';
   buildStep: number;
   totalSteps: number;
-  moldStyle: 'block' | 'standee';
   heightCm: number;
   depthCm: number;
-  smoothness?: 'Easy' | 'Medium' | 'Hard';
   includeStand?: boolean;
   sampleId?: string | null;
   updatedAt: number;
@@ -31,12 +29,6 @@ export interface CreationItem {
   engineUsed?: string | null;
   aiSource?: string | null;
   aiWarning?: string | null;
-  qualityMetrics?: {
-    solidity: number;
-    sharpness: number;
-    cropEdgeQuality: number;
-    pixelCoverage?: number;
-  };
   contour?: {
     points: ContourPoint[];
     perimeterMm: number;
@@ -47,7 +39,7 @@ export interface CreationItem {
 
 export interface BadgeState {
   firstCutout: boolean;  // ✂️ Subject Lifter
-  puff3d: boolean;       // 🧊 3D Crafter
+  crisp3d: boolean;      // 🧊 Crisp 3D Crafter
   printer: boolean;      // 🖨️ Print Master
   masterFolder: boolean; // 🏆 Master Folder
 }
@@ -63,17 +55,13 @@ const STORAGE_KEYS = {
   BADGES: '@foldly_badges',
   STATS: '@foldly_stats',
   PAPER_SIZE: '@foldly_paper_size',
-  ONBOARDING_DONE: '@foldly_onboarding_done',
   API_URL_OVERRIDE: '@foldly_api_url',
 };
-
-// ── Unique Device ID ──────────────────────────────────────────────────────────
 
 export async function getOrCreateDeviceId(): Promise<string> {
   try {
     const existing = await AsyncStorage.getItem(STORAGE_KEYS.DEVICE_ID);
     if (existing) return existing;
-
     const newId = `dev_${Crypto.randomUUID()}`;
     await AsyncStorage.setItem(STORAGE_KEYS.DEVICE_ID, newId);
     return newId;
@@ -81,8 +69,6 @@ export async function getOrCreateDeviceId(): Promise<string> {
     return 'dev_fallback_guest';
   }
 }
-
-// ── Custom Backend URL Override ───────────────────────────────────────────────
 
 export async function getApiUrlOverride(): Promise<string | null> {
   try {
@@ -104,8 +90,6 @@ export async function setApiUrlOverride(url: string | null): Promise<void> {
     console.warn('Failed to save API URL override:', err);
   }
 }
-
-// ── Creations Management ──────────────────────────────────────────────────────
 
 export async function getSavedCreations(): Promise<CreationItem[]> {
   try {
@@ -148,17 +132,21 @@ export async function deleteCreation(id: string): Promise<void> {
   }
 }
 
-// ── Badges ────────────────────────────────────────────────────────────────────
-
 export async function getBadges(): Promise<BadgeState> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEYS.BADGES);
     if (!raw) {
-      return { firstCutout: false, puff3d: false, printer: false, masterFolder: false };
+      return { firstCutout: false, crisp3d: false, printer: false, masterFolder: false };
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return {
+      firstCutout: !!parsed.firstCutout,
+      crisp3d: Boolean(parsed.crisp3d ?? parsed.puff3d),
+      printer: !!parsed.printer,
+      masterFolder: !!parsed.masterFolder,
+    };
   } catch {
-    return { firstCutout: false, puff3d: false, printer: false, masterFolder: false };
+    return { firstCutout: false, crisp3d: false, printer: false, masterFolder: false };
   }
 }
 
@@ -176,16 +164,10 @@ export async function unlockBadge(key: keyof BadgeState): Promise<void> {
 
 export async function checkAndUnlockBadges(stage: number, status?: string): Promise<void> {
   try {
-    if (stage >= 2) {
-      await unlockBadge('firstCutout');
-    }
-    if (stage >= 3) {
-      await unlockBadge('puff3d');
-    }
-    if (stage >= 5) {
-      await unlockBadge('printer');
-    }
-    if (stage >= 6 && status === 'Built') {
+    if (stage >= 2) await unlockBadge('firstCutout');
+    if (stage >= 3) await unlockBadge('crisp3d');
+    if (stage >= 4) await unlockBadge('printer');
+    if (status === 'Built') {
       await unlockBadge('masterFolder');
       await incrementBuilt();
     }
@@ -193,8 +175,6 @@ export async function checkAndUnlockBadges(stage: number, status?: string): Prom
     console.warn('Failed to check and unlock badges:', err);
   }
 }
-
-// ── Stats ─────────────────────────────────────────────────────────────────────
 
 export async function getStats(): Promise<UserStats> {
   try {
@@ -226,8 +206,6 @@ export async function incrementBuilt(): Promise<void> {
   }
 }
 
-// ── Preferences & Onboarding ──────────────────────────────────────────────────
-
 export async function getPaperPreference(): Promise<'A4' | 'Letter'> {
   try {
     const val = await AsyncStorage.getItem(STORAGE_KEYS.PAPER_SIZE);
@@ -242,22 +220,5 @@ export async function setPaperPreference(pref: 'A4' | 'Letter'): Promise<void> {
     await AsyncStorage.setItem(STORAGE_KEYS.PAPER_SIZE, pref);
   } catch (err) {
     console.warn('Failed to set paper pref:', err);
-  }
-}
-
-export async function getOnboardingDone(): Promise<boolean> {
-  try {
-    const val = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_DONE);
-    return val === 'true';
-  } catch {
-    return false;
-  }
-}
-
-export async function setOnboardingDone(done: boolean): Promise<void> {
-  try {
-    await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_DONE, done ? 'true' : 'false');
-  } catch (err) {
-    console.warn('Failed to set onboarding status:', err);
   }
 }

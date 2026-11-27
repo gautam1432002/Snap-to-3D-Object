@@ -49,6 +49,12 @@ class ScanResponse(BaseModel):
     status: str = "queued"
 
 
+class Base64ScanRequest(BaseModel):
+    image_base64: str = Field(..., min_length=16)
+    filename: str = "scan.jpg"
+    mime_type: str = "image/jpeg"
+
+
 class JobStatusResponse(BaseModel):
     job_id: str
     project_id: str

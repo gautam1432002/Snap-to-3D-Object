@@ -4,13 +4,15 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  TouchableOpacity,
   Image,
   Modal,
-  SafeAreaView,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
-import { Colors, Spacing, Typography } from '../../constants/theme';
+import { Trash2 } from 'lucide-react-native';
+import { Colors, Typography } from '../../constants/theme';
 import { CuttingMatBackground } from '../../components/CuttingMatBackground';
 import { PaperSheet } from '../../components/PaperSheet';
 import { CraftButton } from '../../components/CraftButton';
@@ -23,6 +25,7 @@ import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
 
 export default function CreationsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [creations, setCreations] = useState<CreationItem[]>([]);
   const [pendingDelete, setPendingDelete] = useState<CreationItem | null>(null);
 
@@ -56,153 +59,138 @@ export default function CreationsScreen() {
 
   return (
     <CuttingMatBackground>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.secHead}>
-            <View>
-              <Text style={styles.hand}>your craft bench</Text>
-              <Text style={styles.title}>My Creations</Text>
-            </View>
-            <CraftButton
-              title="+ Scan New"
-              small
-              onPress={() => router.push('/workflow')}
-            />
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: Math.max(insets.top, 28) + 8,
+            paddingBottom: Math.max(insets.bottom, 14) + 96,
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.secHead}>
+          <View>
+            <Text style={styles.hand}>your craft bench</Text>
+            <Text style={styles.title}>Creations</Text>
           </View>
+          <CraftButton
+            title="+ Scan New"
+            small
+            onPress={() => router.push('/workflow')}
+          />
+        </View>
 
-          {creations.length === 0 ? (
-            <PaperSheet style={styles.emptyCard}>
-              <Text style={{ fontSize: 38, marginBottom: 8 }}>✂️</Text>
-              <Text style={styles.emptyTitle}>Your craft bench is empty</Text>
-              <Text style={styles.emptyDesc}>
-                Scan any real-world object or start a template to see your saved 3D paper crafts here.
-              </Text>
-            </PaperSheet>
-          ) : (
-            <View style={{ gap: 11 }}>
-              {creations.map((c) => {
-                const tpl = c.sampleId
-                  ? SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]
-                  : null;
-                const badgeStyle =
-                  c.status === 'Built'
-                    ? styles.pillEasy
-                    : c.status === 'Building'
-                    ? styles.pillMed
-                    : styles.pillReady;
-                const badgeTextStyle =
-                  c.status === 'Built'
-                    ? styles.textEasy
-                    : c.status === 'Building'
-                    ? styles.textMed
-                    : styles.textReady;
+        {creations.length === 0 ? (
+          <PaperSheet style={styles.emptyCard}>
+            <Text style={{ fontSize: 38, marginBottom: 8 }}>✂️</Text>
+            <Text style={styles.emptyTitle}>No saved crafts yet</Text>
+            <Text style={styles.emptyDesc}>
+              Scan a real object or try a sample craft to see your saved 3D models here.
+            </Text>
+          </PaperSheet>
+        ) : (
+          <View style={styles.grid}>
+            {creations.map((c) => {
+              const tpl = c.sampleId
+                ? SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]
+                : null;
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  activeOpacity={0.88}
+                  onPress={() => openCreation(c)}
+                  style={styles.gridItem}
+                >
+                  <PaperSheet style={styles.card}>
+                    <TouchableOpacity
+                      onPress={() => setPendingDelete(c)}
+                      style={styles.delBtn}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Trash2 size={14} color={Colors.cut} />
+                    </TouchableOpacity>
 
-                return (
-                  <PaperSheet key={c.id} style={styles.cardRow}>
                     <View style={styles.thumbBox}>
                       {c.trimmedBase64 || c.trimmedUrl ? (
                         <Image
                           source={{ uri: c.trimmedBase64 || c.trimmedUrl || '' }}
-                          style={{ width: 52, height: 56 }}
+                          style={{ width: 82, height: 82 }}
                           resizeMode="contain"
                         />
                       ) : tpl ? (
-                        <SvgXml xml={tpl.svgMarkup} width={52} height={56} />
+                        <SvgXml xml={tpl.svgMarkup} width={82} height={82} />
                       ) : (
-                        <Text style={{ fontSize: 28 }}>✂️</Text>
+                        <Text style={{ fontSize: 34 }}>✂️</Text>
                       )}
                     </View>
 
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardTitle} numberOfLines={1}>
-                        {c.name}
-                      </Text>
-                      <View style={styles.metaPills}>
-                        <View style={styles.metaPill}>
-                          <Text style={styles.metaPillText}>{c.heightCm}cm</Text>
-                        </View>
-                        <View style={styles.metaPill}>
-                          <Text style={styles.metaPillText}>
-                            {c.moldStyle === 'standee' ? 'Standee' : 'Crisp 3D'}
-                          </Text>
-                        </View>
-                        <View style={[styles.metaPill, badgeStyle]}>
-                          <Text style={[styles.metaPillText, badgeTextStyle]}>
-                            {c.status}
-                          </Text>
-                        </View>
-                      </View>
+                    <Text style={styles.cardTitle} numberOfLines={1}>
+                      {c.name}
+                    </Text>
 
-                      <View style={styles.btnRow}>
-                        <CraftButton
-                          title="Open"
-                          small
-                          onPress={() => openCreation(c)}
-                          style={{ flex: 1 }}
-                        />
-                        <CraftButton
-                          title="🗑️"
-                          variant="paper"
-                          small
-                          onPress={() => setPendingDelete(c)}
-                          style={{ flex: 0.45 }}
-                        />
+                    <View style={styles.cardMetaRow}>
+                      <Text style={styles.cardMeta}>{c.heightCm} cm</Text>
+                      <View
+                        style={[
+                          styles.statusTag,
+                          c.status === 'Built'
+                            ? styles.tagBuilt
+                            : c.status === 'Building'
+                            ? styles.tagBuilding
+                            : styles.tagReady,
+                        ]}
+                      >
+                        <Text style={styles.statusTagText}>{c.status}</Text>
                       </View>
                     </View>
                   </PaperSheet>
-                );
-              })}
-            </View>
-          )}
-
-          <View style={{ height: Spacing.bottomBarOffset }} />
-        </ScrollView>
-
-        {/* Delete Confirm Modal */}
-        <Modal
-          visible={!!pendingDelete}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setPendingDelete(null)}
-        >
-          <View style={styles.backdrop}>
-            <PaperSheet style={styles.modalCard}>
-              <Text style={{ fontSize: 34, marginBottom: 6 }}>🗑️</Text>
-              <Text style={styles.modalTitle}>Delete this creation?</Text>
-              <Text style={styles.modalDesc}>
-                This removes "{pendingDelete?.name}" from your craft bench.
-              </Text>
-              <View style={styles.modalBtnRow}>
-                <CraftButton
-                  title="Cancel"
-                  variant="paper"
-                  onPress={() => setPendingDelete(null)}
-                  style={{ flex: 1 }}
-                />
-                <CraftButton
-                  title="Delete"
-                  variant="danger"
-                  onPress={confirmDelete}
-                  style={{ flex: 1 }}
-                />
-              </View>
-            </PaperSheet>
+                </TouchableOpacity>
+              );
+            })}
           </View>
-        </Modal>
-      </SafeAreaView>
+        )}
+      </ScrollView>
+
+      {/* Delete Confirm Modal */}
+      <Modal
+        visible={!!pendingDelete}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPendingDelete(null)}
+      >
+        <View style={styles.backdrop}>
+          <PaperSheet style={styles.modalCard}>
+            <Text style={{ fontSize: 34, marginBottom: 6 }}>🗑️</Text>
+            <Text style={styles.modalTitle}>Delete this craft?</Text>
+            <Text style={styles.modalDesc}>
+              Remove "{pendingDelete?.name}" from your saved creations?
+            </Text>
+            <View style={styles.modalBtnRow}>
+              <CraftButton
+                title="Cancel"
+                variant="paper"
+                onPress={() => setPendingDelete(null)}
+                style={{ flex: 1 }}
+              />
+              <CraftButton
+                title="Delete"
+                variant="danger"
+                onPress={confirmDelete}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </PaperSheet>
+        </View>
+      </Modal>
     </CuttingMatBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: 15,
-    paddingTop: 18,
-    gap: 12,
+    paddingHorizontal: 16,
+    gap: 14,
   },
   secHead: {
     flexDirection: 'row',
@@ -218,7 +206,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     alignItems: 'center',
-    paddingVertical: 26,
+    paddingVertical: 28,
     paddingHorizontal: 16,
   },
   emptyTitle: {
@@ -233,54 +221,66 @@ const styles = StyleSheet.create({
     marginTop: 5,
     lineHeight: 18,
   },
-  cardRow: {
+  grid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  gridItem: {
+    width: '48.2%',
+  },
+  card: {
+    padding: 10,
+    gap: 7,
+    position: 'relative',
+  },
+  delBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 4,
+    padding: 5,
+    borderRadius: 99,
+    backgroundColor: '#fee2e2',
   },
   thumbBox: {
-    width: 64,
-    height: 70,
-    borderRadius: 13,
+    height: 98,
+    borderRadius: 12,
     backgroundColor: '#edf5f1',
-    borderWidth: 1.5,
+    borderWidth: 1.2,
     borderStyle: 'dashed',
     borderColor: '#9db8af',
     alignItems: 'center',
     justifyContent: 'center',
   },
   cardTitle: {
-    fontSize: 15,
+    fontSize: 13.5,
     fontWeight: '800',
     color: Colors.ink,
   },
-  metaPills: {
+  cardMetaRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5,
-    marginTop: 5,
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  metaPill: {
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 99,
-    backgroundColor: '#e8f1ee',
-  },
-  metaPillText: {
-    fontSize: 10,
+  cardMeta: {
+    fontSize: 11,
     fontWeight: '700',
-    color: Colors.ink,
+    color: Colors.muted,
   },
-  pillEasy: { backgroundColor: Colors.easyBg },
-  pillMed: { backgroundColor: Colors.medBg },
-  pillReady: { backgroundColor: Colors.statusReadyBg },
-  textEasy: { color: Colors.easyText },
-  textMed: { color: Colors.medText },
-  textReady: { color: Colors.statusReadyText },
-  btnRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
+  statusTag: {
+    paddingVertical: 2,
+    paddingHorizontal: 7,
+    borderRadius: 99,
+  },
+  tagReady: { backgroundColor: Colors.statusReadyBg },
+  tagBuilding: { backgroundColor: Colors.medBg },
+  tagBuilt: { backgroundColor: Colors.easyBg },
+  statusTagText: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: Colors.ink,
   },
   backdrop: {
     flex: 1,

@@ -17,7 +17,7 @@ export interface PdfTemplateOptions {
   paperSize: 'A4' | 'Letter';
   heightCm: number;
   depthCm: number;
-  moldStyle: 'block' | 'standee';
+  moldStyle?: 'block' | 'standee';
   includeStand: boolean;
   edgeColorHex?: string;
   perimeterMm?: number;

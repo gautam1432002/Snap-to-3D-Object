@@ -76,3 +76,36 @@ async def test_project_assets_endpoint_returns_base64_and_contour(client, tmp_pa
     assert "y" in assets["contour"]["points"][0]
     assert assets["perimeter_mm"] > 0
     assert assets["edge_color"].startswith("#")
+
+
+@pytest.mark.asyncio
+async def test_scan_base64_endpoint_runs_pipeline(client, monkeypatch):
+    import base64
+
+    monkeypatch.setattr(segmentation, "_REMBG_AVAILABLE", False)
+
+    img_bytes = _create_object_on_white_png()
+    b64_str = base64.b64encode(img_bytes).decode("ascii")
+    payload = {
+        "image_base64": f"data:image/png;base64,{b64_str}",
+        "filename": "android_scan.png",
+        "mime_type": "image/png",
+    }
+    headers = {"X-Device-ID": "dev-base64-test"}
+
+    scan_resp = await client.post("/api/v1/projects/scan-base64", json=payload, headers=headers)
+    assert scan_resp.status_code == 202
+    data = scan_resp.json()
+    project_id = data["project_id"]
+    job_id = data["job_id"]
+
+    job_resp = await client.get(f"/api/v1/jobs/{job_id}")
+    assert job_resp.status_code == 200
+    assert job_resp.json()["status"] == "done"
+
+    assets_resp = await client.get(f"/api/v1/projects/{project_id}/assets", headers=headers)
+    assert assets_resp.status_code == 200
+    assets = assets_resp.json()
+    assert assets["trimmed_base64"].startswith("data:image/png;base64,")
+    assert assets["contour"] is not None
+    assert len(assets["contour"]["points"]) >= 4

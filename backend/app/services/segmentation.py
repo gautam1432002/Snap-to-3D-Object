@@ -39,6 +39,7 @@ _REMBG_SESSION = None
 logger = logging.getLogger(__name__)
 
 PREVIEW_MAX = 512
+TRIMMED_MAX = 1024
 
 
 def _get_rembg_session():
@@ -221,21 +222,21 @@ def _denoise_alpha(alpha: np.ndarray) -> np.ndarray:
     return clean
 
 
-def _sigmoid_alpha(alpha: np.ndarray, k: float = 8.0, mid: float = 0.45) -> np.ndarray:
-    """Sigmoid contrast boost to sharpen soft alpha edges."""
+def _sigmoid_alpha(alpha: np.ndarray, k: float = 10.0, mid: float = 0.45) -> np.ndarray:
+    """Crisp sigmoid contrast boost to keep silhouette edges razor-sharp."""
     a = alpha.astype(np.float32) / 255.0
     boosted = 1.0 / (1.0 + np.exp(-k * (a - mid)))
     boosted[alpha < 5] = 0.0
-    boosted[alpha > 250] = 1.0
+    boosted[alpha > 245] = 1.0
     return np.clip(boosted * 255, 0, 255).astype(np.uint8)
 
 
 def _decontaminate_halo(rgba: np.ndarray) -> np.ndarray:
-    """Suppress semi-transparent fringe pixels (halo decontamination)."""
+    """Suppress outer semi-transparent fringe pixels without softening opaque interior detail."""
     alpha = rgba[:, :, 3].copy()
-    halo_mask = (alpha > 10) & (alpha < 180)
+    halo_mask = (alpha > 10) & (alpha < 140)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    strong_alpha = (alpha > 180).astype(np.uint8)
+    strong_alpha = (alpha >= 180).astype(np.uint8)
     eroded = cv2.erode(strong_alpha, kernel, iterations=1)
     fringe = halo_mask & (eroded == 0)
     rgba[fringe, 3] = 0
@@ -317,9 +318,12 @@ async def run_segmentation(image_path: Path, output_dir: Path) -> SegResult:
     # Quality metrics
     solidity, sharpness, crop_edge_quality, pixel_coverage = _quality_metrics(rgba)
 
-    # Save full-res trimmed PNG
+    # Save sharp full-res trimmed PNG (capped cleanly at TRIMMED_MAX=1024px)
     trimmed_path = output_dir / "trimmed.png"
-    Image.fromarray(rgba, "RGBA").save(trimmed_path, "PNG", optimize=False)
+    trimmed_img = Image.fromarray(rgba, "RGBA")
+    if max(trimmed_img.size) > TRIMMED_MAX:
+        trimmed_img.thumbnail((TRIMMED_MAX, TRIMMED_MAX), Image.LANCZOS)
+    trimmed_img.save(trimmed_path, "PNG", optimize=False)
 
     # Save 512px preview PNG (LANCZOS)
     preview_path = output_dir / "preview.png"

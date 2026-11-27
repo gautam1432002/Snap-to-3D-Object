@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { SvgXml } from 'react-native-svg';
+import { Camera, Image as ImageIcon } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
 import { CraftButton } from '../CraftButton';
 import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
 
-interface Stage1CaptureProps {
+interface Step1SnapProps {
   capturedUri: string | null;
   selectedSampleId: string | null;
   modelName: string;
@@ -23,7 +24,7 @@ interface Stage1CaptureProps {
   onConfirm: () => void;
 }
 
-export function Stage1Capture({
+export function Step1Snap({
   capturedUri,
   selectedSampleId,
   modelName,
@@ -32,32 +33,20 @@ export function Stage1Capture({
   onSelectSample,
   onRetake,
   onConfirm,
-}: Stage1CaptureProps) {
-  const [showTips, setShowTips] = useState(false);
-
+}: Step1SnapProps) {
   const activeSample =
     selectedSampleId && SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
       ? SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
       : SAMPLE_TEMPLATES.crossing;
 
-  const statusText = capturedUri
-    ? '📸 Photo ready! Confirm below'
-    : `📷 Sample: ${activeSample.name}`;
-
   return (
     <View style={styles.container}>
-      {/* Viewfinder Target Area */}
+      {/* Clean Viewfinder Frame */}
       <View style={styles.viewportBox}>
         <View style={[styles.corner, styles.cornerTL]} />
         <View style={[styles.corner, styles.cornerTR]} />
         <View style={[styles.corner, styles.cornerBL]} />
         <View style={[styles.corner, styles.cornerBR]} />
-
-        <View style={styles.statusPill}>
-          <Text style={styles.statusPillText} numberOfLines={1}>
-            {statusText}
-          </Text>
-        </View>
 
         {capturedUri ? (
           <Image
@@ -68,15 +57,17 @@ export function Stage1Capture({
         ) : (
           <View style={styles.sampleWrap}>
             <SvgXml xml={activeSample.svgMarkup} width={175} height={175} />
-            <Text style={styles.sampleLabel}>{modelName || activeSample.name}</Text>
+            <Text style={styles.sampleLabel}>
+              Sample: {modelName || activeSample.name}
+            </Text>
           </View>
         )}
       </View>
 
       {capturedUri ? (
         <View style={styles.confirmBox}>
-          <Text style={styles.confirmHint}>
-            Looks clear! Tap below to run edge-by-edge Subject Lift & Quality Check on your server.
+          <Text style={styles.hint}>
+            Photo compressed cleanly at 1024px. Ready to lift the cutout!
           </Text>
           <View style={styles.btnRow}>
             <CraftButton
@@ -86,7 +77,7 @@ export function Stage1Capture({
               style={{ flex: 0.8 }}
             />
             <CraftButton
-              title="✂️ Confirm & Lift →"
+              title="Lift Cutout →"
               variant="primary"
               onPress={onConfirm}
               style={{ flex: 1.4 }}
@@ -94,47 +85,28 @@ export function Stage1Capture({
           </View>
         </View>
       ) : (
-        <View style={styles.liveBox}>
-          {/* Upload / Shutter / Gallery Row */}
-          <View style={styles.shutterRow}>
+        <View style={styles.controlsBox}>
+          {/* Primary Camera & Gallery Actions */}
+          <View style={styles.btnRow}>
             <CraftButton
-              title="🖼️ Gallery"
-              variant="alt"
-              small
+              title="Take Photo"
+              variant="primary"
+              icon={<Camera size={18} color={Colors.ink} strokeWidth={2.3} />}
+              onPress={onTakePhoto}
+              style={{ flex: 1 }}
+            />
+            <CraftButton
+              title="Choose Photo"
+              variant="paper"
+              icon={<ImageIcon size={18} color={Colors.ink} strokeWidth={2.2} />}
               onPress={onPickGallery}
-              style={{ width: 102 }}
-            />
-
-            <TouchableOpacity
-              onPress={onTakePhoto}
-              activeOpacity={0.85}
-              style={styles.shutterBtn}
-              accessibilityLabel="Take photo with camera"
-            />
-
-            <CraftButton
-              title="📷 Camera"
-              variant="alt"
-              small
-              onPress={onTakePhoto}
-              style={{ width: 102 }}
+              style={{ flex: 1 }}
             />
           </View>
 
-          {/* Crisp Sample Objects */}
-          <View style={styles.matCard}>
-            <View style={styles.secHead}>
-              <Text style={styles.sampleHeadText}>
-                Or test with a crisp sample object:
-              </Text>
-              <TouchableOpacity
-                onPress={() => setShowTips((v) => !v)}
-                style={styles.infoBtn}
-              >
-                <Text style={styles.infoBtnText}>i</Text>
-              </TouchableOpacity>
-            </View>
-
+          {/* Compact Sample Chips */}
+          <View style={styles.sampleCard}>
+            <Text style={styles.sampleHead}>Or pick an instant sample:</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -142,10 +114,10 @@ export function Stage1Capture({
             >
               {(
                 [
-                  { id: 'crossing', label: '🚸 Crossing Sign' },
-                  { id: 'sneaker', label: '👟 Retro Sneaker' },
-                  { id: 'fox', label: '🦊 Fox Sticker' },
-                  { id: 'boba', label: '🧋 Boba Cup' },
+                  { id: 'crossing', label: '🚸 Crossing' },
+                  { id: 'sneaker', label: '👟 Sneaker' },
+                  { id: 'fox', label: '🦊 Fox' },
+                  { id: 'boba', label: '🧋 Boba' },
                 ] as const
               ).map((item) => {
                 const active = (selectedSampleId || 'crossing') === item.id;
@@ -165,20 +137,9 @@ export function Stage1Capture({
             </ScrollView>
           </View>
 
-          {showTips && (
-            <View style={styles.infoDrawer}>
-              <Text style={styles.infoText}>
-                📸 <Text style={{ fontWeight: '800' }}>Tips for a super clean Subject Lift:</Text>
-                {'\n'}• Center your object with a little space around all edges.
-                {'\n'}• Plain or contrasting backgrounds give ultra-sharp cutouts.
-                {'\n'}• Even if an edge is cropped, Gemini Polish restores missing pixels!
-              </Text>
-            </View>
-          )}
-
           <CraftButton
-            title={`✂️ Lift & Craft "${activeSample.shortName}" Sample →`}
-            variant="primary"
+            title={`Craft "${activeSample.shortName}" Sample →`}
+            variant="teal"
             onPress={onConfirm}
           />
         </View>
@@ -188,9 +149,9 @@ export function Stage1Capture({
 }
 
 const styles = StyleSheet.create({
-  container: { gap: 11 },
+  container: { gap: 12 },
   viewportBox: {
-    height: 245,
+    height: 255,
     borderRadius: 20,
     backgroundColor: '#0d1f1a',
     borderWidth: 2,
@@ -213,98 +174,48 @@ const styles = StyleSheet.create({
   cornerTR: { top: 12, right: 12, borderLeftWidth: 0, borderBottomWidth: 0 },
   cornerBL: { bottom: 12, left: 12, borderRightWidth: 0, borderTopWidth: 0 },
   cornerBR: { bottom: 12, right: 12, borderLeftWidth: 0, borderTopWidth: 0 },
-  statusPill: {
-    position: 'absolute',
-    top: 10,
-    zIndex: 10,
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    borderRadius: 99,
-    backgroundColor: 'rgba(16, 38, 32, 0.78)',
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    maxWidth: '86%',
-  },
-  statusPillText: {
-    color: Colors.inkOnMat,
-    fontSize: 11,
-    fontWeight: '700',
-  },
   previewImage: {
     width: '92%',
-    height: '86%',
+    height: '88%',
   },
   sampleWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 22,
   },
   sampleLabel: {
     color: Colors.sage,
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '700',
-    marginTop: 4,
+    marginTop: 6,
   },
-  liveBox: {
-    gap: 10,
+  controlsBox: { gap: 11 },
+  confirmBox: { gap: 10 },
+  hint: {
+    fontSize: 12.5,
+    color: Colors.sage,
+    textAlign: 'center',
   },
-  shutterRow: {
+  btnRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    gap: 9,
   },
-  shutterBtn: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    borderWidth: 4,
-    borderColor: '#ffffff',
-    backgroundColor: Colors.cut,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.45,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  matCard: {
+  sampleCard: {
     backgroundColor: Colors.matCardBg,
     borderWidth: 1.5,
     borderColor: Colors.matCardBorder,
     borderRadius: 16,
-    padding: 10,
+    padding: 11,
     gap: 8,
   },
-  secHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sampleHeadText: {
-    fontSize: 11.5,
+  sampleHead: {
+    fontSize: 12,
     fontWeight: '700',
     color: Colors.inkOnMat,
   },
-  infoBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: Colors.sage,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoBtnText: {
-    color: Colors.ruler,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  chipRow: {
-    gap: 7,
-  },
+  chipRow: { gap: 8 },
   chip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 7,
+    paddingHorizontal: 13,
     borderRadius: 99,
     borderWidth: 1.5,
     borderColor: 'rgba(157, 184, 175, 0.4)',
@@ -315,37 +226,12 @@ const styles = StyleSheet.create({
     borderColor: Colors.ink,
   },
   chipText: {
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '600',
     color: Colors.inkOnMat,
   },
   chipTextActive: {
     color: Colors.ink,
     fontWeight: '800',
-  },
-  infoDrawer: {
-    backgroundColor: 'rgba(16, 38, 32, 0.95)',
-    borderWidth: 1.5,
-    borderColor: Colors.ruler,
-    borderRadius: 14,
-    padding: 10,
-  },
-  infoText: {
-    fontSize: 11.5,
-    lineHeight: 17,
-    color: Colors.inkOnMat,
-  },
-  confirmBox: {
-    gap: 10,
-  },
-  confirmHint: {
-    fontSize: 12,
-    color: Colors.sage,
-    textAlign: 'center',
-    lineHeight: 17,
-  },
-  btnRow: {
-    flexDirection: 'row',
-    gap: 8,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -6,30 +6,24 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  SafeAreaView,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
-import { Colors, Spacing, Typography } from '../../constants/theme';
+import { Colors, Typography } from '../../constants/theme';
 import { CuttingMatBackground } from '../../components/CuttingMatBackground';
 import { PaperSheet } from '../../components/PaperSheet';
-import { TourModal } from '../../components/TourModal';
 import { ServerUrlModal } from '../../components/ServerUrlModal';
 import { checkBackendHealth, DEMO_SAMPLES } from '../../services/api';
-import {
-  CreationItem,
-  getOnboardingDone,
-  getSavedCreations,
-  setOnboardingDone,
-} from '../../services/storage';
+import { CreationItem, getSavedCreations } from '../../services/storage';
 import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [backendUrl, setBackendUrl] = useState<string>('');
   const [creations, setCreations] = useState<CreationItem[]>([]);
-  const [tourOpen, setTourOpen] = useState(false);
   const [serverModalOpen, setServerModalOpen] = useState(false);
 
   const refreshData = useCallback(async () => {
@@ -48,18 +42,7 @@ export default function HomeScreen() {
     }, [refreshData])
   );
 
-  useEffect(() => {
-    getOnboardingDone().then((done) => {
-      if (!done) setTourOpen(true);
-    });
-  }, []);
-
   const ongoing = creations.find((c) => c.status === 'Building');
-
-  const handleCloseTour = async () => {
-    setTourOpen(false);
-    await setOnboardingDone(true);
-  };
 
   const launchTemplate = (sampleId: string) => {
     router.push({
@@ -80,40 +63,36 @@ export default function HomeScreen() {
 
   return (
     <CuttingMatBackground>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Header Row */}
-          <View style={styles.headerRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.hand}>hello, maker! 👋</Text>
-              <Text style={styles.heroTitle}>
-                Snap an object.{'\n'}Craft it in 3D paper.
-              </Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setTourOpen(true)}
-              style={styles.guidePill}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.guidePillText}>🎓 Guide</Text>
-            </TouchableOpacity>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: Math.max(insets.top, 28) + 8,
+            paddingBottom: Math.max(insets.bottom, 14) + 96,
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header + Tappable Server Status Pill */}
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.hand}>hello, maker! 👋</Text>
+            <Text style={styles.heroTitle}>
+              Snap an object.{'\n'}Craft it in 3D paper.
+            </Text>
           </View>
 
-          {/* Tappable Backend Connection Pill */}
           <TouchableOpacity
             onPress={() => setServerModalOpen(true)}
             activeOpacity={0.8}
             style={[
-              styles.connPill,
-              backendOnline ? styles.connOnline : styles.connOffline,
+              styles.statusPill,
+              backendOnline ? styles.statusOnline : styles.statusOffline,
             ]}
           >
             <View
               style={[
-                styles.connDot,
+                styles.statusDot,
                 {
                   backgroundColor:
                     backendOnline === null
@@ -124,183 +103,121 @@ export default function HomeScreen() {
                 },
               ]}
             />
-            <Text style={styles.connText} numberOfLines={1}>
+            <Text style={styles.statusText} numberOfLines={1}>
               {backendOnline === null
-                ? 'Checking FastAPI...'
+                ? 'Checking...'
                 : backendOnline
-                ? `Backend Online • ${backendUrl}`
-                : `Offline (${backendUrl}) — Tap to configure IP`}
+                ? 'Connected'
+                : 'Offline — Set IP'}
             </Text>
-            <Text style={styles.connEdit}>Edit ›</Text>
           </TouchableOpacity>
+        </View>
 
-          {/* Prominent White Paper Scan an Object CTA Card */}
+        {/* Prominent White Paper Scan Real Object CTA Card */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => router.push('/workflow')}
+        >
+          <PaperSheet style={styles.scanCta}>
+            <View style={styles.scanThumb}>
+              <Text style={{ fontSize: 32 }}>📸</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.scanTitle}>Scan Real Object</Text>
+              <Text style={styles.scanDesc}>
+                Snap or pick any photo to lift a sharp cutout, inspect it in Crisp 3D, and print exact-scale PDF sheets.
+              </Text>
+              <View style={styles.ctaPill}>
+                <Text style={styles.ctaPillText}>
+                  ✂️ Cutout → 🧊 Crisp 3D → 🖨️ PDF
+                </Text>
+              </View>
+            </View>
+          </PaperSheet>
+        </TouchableOpacity>
+
+        {/* Dynamic Continue Building Banner */}
+        {ongoing && (
           <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => router.push('/workflow')}
+            activeOpacity={0.85}
+            onPress={() => openSavedCreation(ongoing)}
+            style={styles.continueCard}
           >
-            <PaperSheet style={styles.scanCta}>
-              <View style={styles.scanThumb}>
-                <Text style={{ fontSize: 30 }}>📸</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.scanTitle}>Scan an Object</Text>
-                <Text style={styles.scanDesc}>
-                  Snap ANY photo! Neural lift isolates the object, Gemini builds the crisp model & draws its cutout sheet.
-                </Text>
-                <View style={styles.ctaPill}>
-                  <Text style={styles.ctaPillText}>
-                    ✨ Neural Lift → Gemini Cutout → 3D
-                  </Text>
-                </View>
-              </View>
-            </PaperSheet>
-          </TouchableOpacity>
-
-          {/* Dynamic Continue Building Banner */}
-          {ongoing && (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => openSavedCreation(ongoing)}
-              style={styles.continueCard}
-            >
-              <View style={styles.continueThumb}>
-                {ongoing.trimmedBase64 || ongoing.trimmedUrl ? (
-                  <Image
-                    source={{ uri: ongoing.trimmedBase64 || ongoing.trimmedUrl || '' }}
-                    style={{ width: 38, height: 38 }}
-                    resizeMode="contain"
-                  />
-                ) : ongoing.sampleId && SAMPLE_TEMPLATES[ongoing.sampleId as keyof typeof SAMPLE_TEMPLATES] ? (
-                  <SvgXml
-                    xml={SAMPLE_TEMPLATES[ongoing.sampleId as keyof typeof SAMPLE_TEMPLATES].svgMarkup}
-                    width={38}
-                    height={38}
-                  />
-                ) : (
-                  <Text style={{ fontSize: 22 }}>✂️</Text>
-                )}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.continueOverline}>CONTINUE BUILDING</Text>
-                <Text style={styles.continueTitle} numberOfLines={1}>
-                  {ongoing.name}
-                </Text>
-                <View style={styles.progMini}>
-                  <View
-                    style={[
-                      styles.progMiniFill,
-                      {
-                        width: `${Math.min(
-                          100,
-                          Math.round(((ongoing.buildStep + 1) / (ongoing.totalSteps || 7)) * 100)
-                        )}%`,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-              <View style={styles.stepPill}>
-                <Text style={styles.stepPillText}>
-                  Step {Math.min(ongoing.buildStep + 1, ongoing.totalSteps || 7)}/{ongoing.totalSteps || 7}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          )}
-
-          {/* How Foldly Works 3-Step Strip */}
-          <View style={styles.secHead}>
-            <Text style={styles.secTitle}>How Foldly works</Text>
-            <TouchableOpacity onPress={() => setTourOpen(true)}>
-              <Text style={styles.secLink}>Watch tour ›</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.howGrid}>
-            <View style={styles.howStep}>
-              <Text style={styles.howEmoji}>✂️</Text>
-              <Text style={styles.howBold}>1. Subject Lift</Text>
-              <Text style={styles.howSub}>Neural + GrabCut</Text>
+            <View style={styles.continueThumb}>
+              {ongoing.trimmedBase64 || ongoing.trimmedUrl ? (
+                <Image
+                  source={{ uri: ongoing.trimmedBase64 || ongoing.trimmedUrl || '' }}
+                  style={{ width: 38, height: 38 }}
+                  resizeMode="contain"
+                />
+              ) : ongoing.sampleId && SAMPLE_TEMPLATES[ongoing.sampleId as keyof typeof SAMPLE_TEMPLATES] ? (
+                <SvgXml
+                  xml={SAMPLE_TEMPLATES[ongoing.sampleId as keyof typeof SAMPLE_TEMPLATES].svgMarkup}
+                  width={38}
+                  height={38}
+                />
+              ) : (
+                <Text style={{ fontSize: 22 }}>✂️</Text>
+              )}
             </View>
-            <View style={styles.howStep}>
-              <Text style={styles.howEmoji}>🧊</Text>
-              <Text style={styles.howBold}>2. Crisp 3D</Text>
-              <Text style={styles.howSub}>Exact silhouette</Text>
-            </View>
-            <View style={styles.howStep}>
-              <Text style={styles.howEmoji}>🖨️</Text>
-              <Text style={styles.howBold}>3. Print & Craft</Text>
-              <Text style={styles.howSub}>A4 / Letter PDF</Text>
-            </View>
-          </View>
-
-          {/* Ready-Made Templates Carousel */}
-          <View style={styles.secHead}>
-            <Text style={styles.secTitle}>Ready-made templates</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/explore')}>
-              <Text style={styles.secLink}>Explore all ›</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.hScroll}
-          >
-            {DEMO_SAMPLES.map((s) => {
-              const tpl = SAMPLE_TEMPLATES[(s.sampleId || 'crossing') as keyof typeof SAMPLE_TEMPLATES];
-              return (
-                <TouchableOpacity
-                  key={s.id}
-                  activeOpacity={0.85}
-                  onPress={() => launchTemplate(tpl.id)}
-                  style={styles.tplCard}
-                >
-                  <View style={styles.tplSvgWrap}>
-                    <SvgXml xml={tpl.svgMarkup} width={54} height={54} />
-                  </View>
-                  <Text style={styles.tplTitle} numberOfLines={1}>
-                    {tpl.shortName}
-                  </Text>
-                  <Text style={styles.tplSub}>
-                    {tpl.difficulty} • {tpl.estMinutes}m
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {/* Recent Creations */}
-          <View style={styles.secHead}>
-            <Text style={styles.secTitle}>Recent creations</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/creations')}>
-              <Text style={styles.secLink}>See all ›</Text>
-            </TouchableOpacity>
-          </View>
-
-          {creations.length === 0 ? (
-            <View style={styles.matCard}>
-              <Text style={styles.emptyText}>
-                No paper crafts yet—tap <Text style={{ fontWeight: '800', color: Colors.inkOnMat }}>Scan an Object</Text> or pick a template above!
+            <View style={{ flex: 1 }}>
+              <Text style={styles.continueOverline}>CONTINUE BUILDING</Text>
+              <Text style={styles.continueTitle} numberOfLines={1}>
+                {ongoing.name}
               </Text>
             </View>
-          ) : (
+            <View style={styles.stepPill}>
+              <Text style={styles.stepPillText}>Resume ›</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Compact 4-Sample Horizontal Strip */}
+        <View style={styles.secHead}>
+          <Text style={styles.secTitle}>Try a Sample Craft</Text>
+          <Text style={styles.secHint}>Instant offline demo</Text>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.hScroll}
+        >
+          {DEMO_SAMPLES.map((s) => {
+            const tpl = SAMPLE_TEMPLATES[(s.sampleId || 'crossing') as keyof typeof SAMPLE_TEMPLATES];
+            return (
+              <TouchableOpacity
+                key={s.id}
+                activeOpacity={0.85}
+                onPress={() => launchTemplate(tpl.id)}
+                style={styles.tplCard}
+              >
+                <View style={styles.tplSvgWrap}>
+                  <SvgXml xml={tpl.svgMarkup} width={54} height={54} />
+                </View>
+                <Text style={styles.tplTitle} numberOfLines={1}>
+                  {tpl.shortName}
+                </Text>
+                <Text style={styles.tplSub}>{tpl.heightCm} cm</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* Recent Creations */}
+        {creations.length > 0 && (
+          <>
+            <View style={styles.secHead}>
+              <Text style={styles.secTitle}>Recent Crafts</Text>
+              <TouchableOpacity onPress={() => router.push('/(tabs)/creations')}>
+                <Text style={styles.secLink}>See all ›</Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={{ gap: 8 }}>
               {creations.slice(0, 3).map((c) => {
-                const badgeBg =
-                  c.status === 'Built'
-                    ? Colors.statusBuiltBg
-                    : c.status === 'Building'
-                    ? Colors.statusBuildingBg
-                    : Colors.statusReadyBg;
-                const badgeTxt =
-                  c.status === 'Built'
-                    ? Colors.statusBuiltText
-                    : c.status === 'Building'
-                    ? Colors.statusBuildingText
-                    : Colors.statusReadyText;
                 const tpl = c.sampleId
                   ? SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]
                   : null;
-
                 return (
                   <TouchableOpacity
                     key={c.id}
@@ -325,50 +242,41 @@ export default function HomeScreen() {
                       <Text style={styles.recentName} numberOfLines={1}>
                         {c.name}
                       </Text>
-                      <Text style={styles.recentSub}>
-                        {c.heightCm}cm • {c.moldStyle === 'standee' ? 'Standee' : 'Crisp 3D'}
-                      </Text>
+                      <Text style={styles.recentSub}>{c.heightCm} cm • Crisp 3D</Text>
                     </View>
-                    <View style={[styles.statusBadge, { backgroundColor: badgeBg }]}>
-                      <Text style={[styles.statusBadgeText, { color: badgeTxt }]}>
-                        {c.status}
-                      </Text>
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{c.status}</Text>
                     </View>
                   </TouchableOpacity>
                 );
               })}
             </View>
-          )}
+          </>
+        )}
+      </ScrollView>
 
-          <View style={{ height: Spacing.bottomBarOffset }} />
-        </ScrollView>
-
-        <TourModal visible={tourOpen} onClose={handleCloseTour} />
-        <ServerUrlModal
-          visible={serverModalOpen}
-          onClose={() => setServerModalOpen(false)}
-          onSaved={(newUrl, ok) => {
-            setBackendUrl(newUrl);
-            setBackendOnline(ok);
-          }}
-        />
-      </SafeAreaView>
+      <ServerUrlModal
+        visible={serverModalOpen}
+        onClose={() => setServerModalOpen(false)}
+        onSaved={(newUrl, ok) => {
+          setBackendUrl(newUrl);
+          setBackendOnline(ok);
+        }}
+      />
     </CuttingMatBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: 15,
-    paddingTop: 18,
-    gap: 13,
+    paddingHorizontal: 16,
+    gap: 15,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 10,
   },
   hand: {
     ...Typography.handwritten,
@@ -378,61 +286,44 @@ const styles = StyleSheet.create({
     ...Typography.hero,
     marginTop: 2,
   },
-  guidePill: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 99,
-    backgroundColor: 'rgba(16, 38, 32, 0.72)',
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  guidePillText: {
-    color: Colors.inkOnMat,
-    fontSize: 11.5,
-    fontWeight: '700',
-  },
-  connPill: {
+  statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 13,
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 99,
     borderWidth: 1.2,
+    marginTop: 4,
   },
-  connOnline: {
-    backgroundColor: 'rgba(46, 196, 182, 0.14)',
-    borderColor: 'rgba(46, 196, 182, 0.45)',
+  statusOnline: {
+    backgroundColor: 'rgba(46, 196, 182, 0.16)',
+    borderColor: 'rgba(46, 196, 182, 0.5)',
   },
-  connOffline: {
-    backgroundColor: 'rgba(230, 57, 70, 0.16)',
-    borderColor: 'rgba(230, 57, 70, 0.5)',
+  statusOffline: {
+    backgroundColor: 'rgba(230, 57, 70, 0.18)',
+    borderColor: 'rgba(230, 57, 70, 0.55)',
   },
-  connDot: {
+  statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
   },
-  connText: {
-    flex: 1,
-    fontSize: 11.5,
-    fontWeight: '700',
+  statusText: {
     color: Colors.inkOnMat,
-  },
-  connEdit: {
-    fontSize: 11.5,
-    fontWeight: '800',
-    color: Colors.ruler,
+    fontSize: 11,
+    fontWeight: '700',
   },
   scanCta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    padding: 15,
   },
   scanThumb: {
-    width: 62,
-    height: 74,
-    borderRadius: 13,
+    width: 64,
+    height: 76,
+    borderRadius: 14,
     backgroundColor: '#e9f3ef',
     borderWidth: 1.5,
     borderStyle: 'dashed',
@@ -441,21 +332,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scanTitle: {
-    fontSize: 17.5,
+    fontSize: 18,
     fontWeight: '800',
     color: Colors.ink,
   },
   scanDesc: {
     fontSize: 12,
     color: '#4b5a55',
-    marginTop: 2,
-    lineHeight: 16.5,
+    marginTop: 3,
+    lineHeight: 17,
   },
   ctaPill: {
     alignSelf: 'flex-start',
-    marginTop: 7,
+    marginTop: 8,
     paddingVertical: 3,
-    paddingHorizontal: 9,
+    paddingHorizontal: 10,
     borderRadius: 99,
     backgroundColor: Colors.ruler,
     borderWidth: 1.5,
@@ -494,25 +385,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.inkOnMat,
   },
-  progMini: {
-    height: 6,
-    borderRadius: 99,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    overflow: 'hidden',
-    marginTop: 5,
-  },
-  progMiniFill: {
-    height: '100%',
-    backgroundColor: Colors.ruler,
-  },
   stepPill: {
     backgroundColor: Colors.ruler,
     paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     borderRadius: 99,
   },
   stepPillText: {
-    fontSize: 10.5,
+    fontSize: 11,
     fontWeight: '800',
     color: Colors.ink,
   },
@@ -527,34 +407,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.inkOnMat,
   },
+  secHint: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: Colors.sage,
+  },
   secLink: {
     fontSize: 12.5,
     fontWeight: '700',
     color: Colors.ruler,
   },
-  howGrid: {
-    flexDirection: 'row',
-    gap: 7,
-  },
-  howStep: {
-    flex: 1,
-    backgroundColor: 'rgba(16, 38, 32, 0.68)',
-    borderWidth: 1,
-    borderColor: 'rgba(157, 184, 175, 0.25)',
-    borderRadius: 13,
-    paddingVertical: 9,
-    paddingHorizontal: 5,
-    alignItems: 'center',
-  },
-  howEmoji: { fontSize: 18, marginBottom: 3 },
-  howBold: { fontSize: 11, fontWeight: '800', color: Colors.inkOnMat },
-  howSub: { fontSize: 9.5, color: Colors.sage, marginTop: 1 },
   hScroll: {
-    gap: 9,
+    gap: 10,
     paddingVertical: 2,
   },
   tplCard: {
-    width: 106,
+    width: 104,
     backgroundColor: Colors.paper,
     borderWidth: 2,
     borderColor: Colors.ink,
@@ -569,8 +437,8 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   tplSvgWrap: {
-    width: 56,
-    height: 56,
+    width: 54,
+    height: 54,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
@@ -585,19 +453,6 @@ const styles = StyleSheet.create({
     color: Colors.muted,
     marginTop: 1,
   },
-  matCard: {
-    backgroundColor: Colors.matCardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.matCardBorder,
-    borderRadius: 16,
-    padding: 13,
-  },
-  emptyText: {
-    fontSize: 12,
-    color: Colors.sage,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
   recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -605,8 +460,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.matCardBg,
     borderWidth: 1.5,
     borderColor: Colors.matCardBorder,
-    borderRadius: 16,
-    padding: 11,
+    borderRadius: 15,
+    padding: 10,
   },
   recentThumb: {
     width: 40,
@@ -626,13 +481,15 @@ const styles = StyleSheet.create({
     color: Colors.sage,
     marginTop: 1,
   },
-  statusBadge: {
+  badge: {
+    backgroundColor: Colors.statusReadyBg,
     paddingVertical: 4,
     paddingHorizontal: 9,
     borderRadius: 99,
   },
-  statusBadgeText: {
+  badgeText: {
     fontSize: 10.5,
     fontWeight: '800',
+    color: Colors.statusReadyText,
   },
 });

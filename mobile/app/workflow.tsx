@@ -5,15 +5,13 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   BackHandler,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { X, ChevronLeft } from 'lucide-react-native';
 
@@ -21,7 +19,7 @@ import { Colors } from '../constants/theme';
 import { CuttingMatBackground } from '../components/CuttingMatBackground';
 import { ServerUrlModal } from '../components/ServerUrlModal';
 import {
-  uploadScan,
+  uploadScanBase64,
   pollJobUntilDone,
   getProjectAssets,
   triggerPolish,
@@ -45,33 +43,31 @@ import {
   svgMarkupToDataUri,
 } from '../utils/sampleTemplates';
 import { generatePrintHtml } from '../utils/pdfTemplate';
+import { printHtmlDirectly, sharePrintablePdf } from '../utils/pdfExport';
 
-import { Stage1Capture } from '../components/workflow/Stage1Capture';
-import { Stage2Lift } from '../components/workflow/Stage2Lift';
-import { Stage3Preview3D } from '../components/workflow/Stage3Preview3D';
-import { Stage4Unfold } from '../components/workflow/Stage4Unfold';
-import { Stage5Print } from '../components/workflow/Stage5Print';
-import { Stage6Build } from '../components/workflow/Stage6Build';
+import { Step1Snap } from '../components/workflow/Step1Snap';
+import { Step2Cutout } from '../components/workflow/Step2Cutout';
+import { Step3Studio3D } from '../components/workflow/Step3Studio3D';
+import { Step4Print } from '../components/workflow/Step4Print';
 
-const STAGE_TITLES = [
+const STEP_TITLES = [
   '',
-  '1. Capture Object',
-  '2. Neural Subject Lift',
-  '3. Crisp 3D Model',
-  '4. Unfold 3D → 2D',
-  '5. Printable Layout',
-  '6. 7-Step Build Guide',
+  '1. Snap Object',
+  '2. Crisp Cutout',
+  '3. Crisp 3D & Unfold',
+  '4. Print & Fold',
 ];
 
 export default function WorkflowScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
     sampleId?: string;
     creationId?: string;
     autoPick?: string;
   }>();
 
-  const [currentStage, setCurrentStage] = useState<number>(1);
+  const [currentStep, setCurrentStep] = useState<number>(1);
   const [scrollLocked, setScrollLocked] = useState<boolean>(false);
   const [serverModalOpen, setServerModalOpen] = useState<boolean>(false);
 
@@ -81,58 +77,43 @@ export default function WorkflowScreen() {
   const [selectedSampleId, setSelectedSampleId] = useState<string | null>('crossing');
   const [modelName, setModelName] = useState<string>(SAMPLE_TEMPLATES.crossing.name);
   const [category, setCategory] = useState<string>(SAMPLE_TEMPLATES.crossing.category);
-  const [estMinutes, setEstMinutes] = useState<number>(SAMPLE_TEMPLATES.crossing.estMinutes);
-  const [buildTip, setBuildTip] = useState<string>(SAMPLE_TEMPLATES.crossing.buildTip);
   const [edgeColorHex, setEdgeColorHex] = useState<string>(SAMPLE_TEMPLATES.crossing.edgeColorHex);
 
-  // Stage 1 & Stage 2 State
+  // Step 1 & Step 2 State
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [capturedBase64, setCapturedBase64] = useState<string | null>(null);
   const [cutoutBase64, setCutoutBase64] = useState<string | null>(null);
-  const [dieCutBorder, setDieCutBorder] = useState<boolean>(false);
-  const [engineUsed, setEngineUsed] = useState<string>('Studio Sample');
   const [aiSource, setAiSource] = useState<string | null>(null);
   const [aiWarning, setAiWarning] = useState<string | null>(null);
-  const [solidity, setSolidity] = useState<number>(94);
-  const [sharpness, setSharpness] = useState<number>(96);
-  const [cropStatus, setCropStatus] = useState<string>('Clean ✓');
   const [isProcessingUpload, setIsProcessingUpload] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadProgressDesc, setUploadProgressDesc] = useState<string>('');
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isPolishing, setIsPolishing] = useState<boolean>(false);
 
-  // Stage 3 & Stage 4 State
+  // Step 3 State
   const [contour, setContour] = useState<ContourPoint[]>(SAMPLE_TEMPLATES.crossing.contour);
   const [perimeterMm, setPerimeterMm] = useState<number>(520);
-  const [moldStyle, setMoldStyle] = useState<'block' | 'standee'>('block');
   const [heightCm, setHeightCm] = useState<number>(18);
   const [depthCm, setDepthCm] = useState<number>(2.5);
-  const [smoothness, setSmoothness] = useState<'Easy' | 'Medium' | 'Hard'>('Medium');
   const [includeStand, setIncludeStand] = useState<boolean>(true);
-  const [unfoldProgress, setUnfoldProgress] = useState<number>(0);
 
-  // Stage 5 State
+  // Step 4 State
   const [paperSize, setPaperSize] = useState<'A4' | 'Letter'>('A4');
   const [aiSheetBase64, setAiSheetBase64] = useState<string | null>(null);
   const [aiSheetWarning, setAiSheetWarning] = useState<string | null>(null);
   const [isGeneratingSheet, setIsGeneratingSheet] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [isSharing, setIsSharing] = useState<boolean>(false);
-
-  // Stage 6 State
-  const [buildStepIdx, setBuildStepIdx] = useState<number>(0);
   const [glueTimerSec, setGlueTimerSec] = useState<number>(20);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
 
-  // Active artwork URI for 3D, Unfold, and PDF
   const activeSample =
     selectedSampleId && SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
       ? SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
       : SAMPLE_TEMPLATES.crossing;
-  const activeArtworkUri =
-    cutoutBase64 || svgMarkupToDataUri(activeSample.svgMarkup);
+  const activeArtworkUri = cutoutBase64 || svgMarkupToDataUri(activeSample.svgMarkup);
 
-  // Load initial preferences / route params
   useEffect(() => {
     getPaperPreference().then(setPaperSize);
 
@@ -142,14 +123,13 @@ export default function WorkflowScreen() {
         const found = saved.find((c) => c.id === params.creationId);
         if (found) {
           applyCreationItem(found);
-          setCurrentStage(found.status === 'Building' ? 6 : 3);
+          setCurrentStep(3);
           return;
         }
       }
       if (params.sampleId && SAMPLE_TEMPLATES[params.sampleId as keyof typeof SAMPLE_TEMPLATES]) {
-        const sId = params.sampleId as keyof typeof SAMPLE_TEMPLATES;
-        applySampleTemplate(sId);
-        setCurrentStage(2);
+        applySampleTemplate(params.sampleId as keyof typeof SAMPLE_TEMPLATES);
+        setCurrentStep(2);
         return;
       }
       if (params.autoPick === 'gallery') {
@@ -159,20 +139,18 @@ export default function WorkflowScreen() {
     bootFromParams();
   }, []);
 
-  // Android hardware back button
   useEffect(() => {
     const onBackPress = () => {
-      if (currentStage > 1) {
-        setCurrentStage((s) => s - 1);
+      if (currentStep > 1) {
+        setCurrentStep((s) => s - 1);
         return true;
       }
       return false;
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => sub.remove();
-  }, [currentStage]);
+  }, [currentStep]);
 
-  // Glue Timer Interval
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     if (isTimerRunning && glueTimerSec > 0) {
@@ -190,26 +168,21 @@ export default function WorkflowScreen() {
     const tpl = SAMPLE_TEMPLATES[sampleKey];
     setIsRealPhoto(false);
     setCapturedUri(null);
+    setCapturedBase64(null);
     setUploadError(null);
     setSelectedSampleId(tpl.id);
     setProjectId(`sample_${tpl.id}_${Date.now()}`);
     setModelName(tpl.name);
     setCategory(tpl.category);
-    setEstMinutes(tpl.estMinutes);
-    setBuildTip(tpl.buildTip);
     setEdgeColorHex(tpl.edgeColorHex);
     setHeightCm(tpl.heightCm);
     setDepthCm(tpl.depthCm);
-    setMoldStyle(tpl.moldStyle);
     setIncludeStand(tpl.suggestStand);
     setContour(tpl.contour);
     setCutoutBase64(svgMarkupToDataUri(tpl.svgMarkup));
-    setEngineUsed('Studio Sample');
     setAiSource(null);
     setAiWarning(null);
-    setSolidity(96);
-    setSharpness(98);
-    setCropStatus('Clean ✓');
+    setAiSheetBase64(null);
   };
 
   const applyCreationItem = (c: CreationItem) => {
@@ -221,19 +194,15 @@ export default function WorkflowScreen() {
     setEdgeColorHex(c.edgeColorHex || '#2ec4b6');
     setHeightCm(c.heightCm || 18);
     setDepthCm(c.depthCm || 2.5);
-    setMoldStyle(c.moldStyle || 'block');
-    setSmoothness(c.smoothness || 'Medium');
     setIncludeStand(c.includeStand !== false);
-    setBuildStepIdx(c.buildStep || 0);
-    if (c.buildTip) setBuildTip(c.buildTip);
-    if (c.estMinutes) setEstMinutes(c.estMinutes);
-    if (c.engineUsed) setEngineUsed(c.engineUsed);
     setAiSource(c.aiSource || null);
     setAiWarning(c.aiWarning || null);
     if (c.trimmedBase64 || c.trimmedUrl) {
       setCutoutBase64(c.trimmedBase64 || c.trimmedUrl || null);
     } else if (c.sampleId && SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]) {
-      setCutoutBase64(svgMarkupToDataUri(SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES].svgMarkup));
+      setCutoutBase64(
+        svgMarkupToDataUri(SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES].svgMarkup)
+      );
     }
     if (c.contour?.points?.length) {
       setContour(normalizeContourPoints(c.contour.points));
@@ -241,34 +210,28 @@ export default function WorkflowScreen() {
     } else if (c.sampleId && SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]) {
       setContour(SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES].contour);
     }
+    if (c.sheetBase64) setAiSheetBase64(c.sheetBase64);
   };
-
-  // ── Persist helper ───────────────────────────────────────────────────────────
 
   const persistProgress = async (
     nextStatus: 'Ready' | 'Building' | 'Built' = 'Ready',
-    overrideStage?: number
+    overrideStep?: number
   ) => {
-    const stageVal = overrideStage ?? currentStage;
-    await checkAndUnlockBadges(stageVal, nextStatus);
+    const stepVal = overrideStep ?? currentStep;
+    await checkAndUnlockBadges(stepVal, nextStatus);
     await saveCreation({
       id: projectId,
       name: modelName,
       category,
       status: nextStatus,
-      buildStep: buildStepIdx,
-      totalSteps: 7,
-      moldStyle,
+      buildStep: nextStatus === 'Built' ? 5 : 0,
+      totalSteps: 5,
       heightCm,
       depthCm,
-      smoothness,
       includeStand,
       sampleId: isRealPhoto ? null : selectedSampleId,
       updatedAt: Date.now(),
       edgeColorHex,
-      estMinutes,
-      buildTip,
-      engineUsed,
       aiSource,
       aiWarning,
       trimmedBase64: cutoutBase64?.startsWith('data:image/png') ? cutoutBase64 : undefined,
@@ -277,43 +240,46 @@ export default function WorkflowScreen() {
         points: contour,
         perimeterMm,
         edgeColorHex,
-        smoothness,
+        smoothness: 'Medium',
       },
     });
   };
 
-  const goToStage = async (next: number) => {
+  const goToStep = async (next: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCurrentStage(next);
-    await persistProgress(next === 6 ? 'Building' : 'Ready', next);
+    setCurrentStep(next);
+    await persistProgress(next === 4 ? 'Building' : 'Ready', next);
   };
 
-  // ── Stage 1 Actions ──────────────────────────────────────────────────────────
+  // ── Step 1 Capture & Base64 Compression ─────────────────────────────────────
 
   const compressAndSetImage = async (uri: string) => {
     try {
       const manip = await ImageManipulator.manipulateAsync(
         uri,
         [{ resize: { width: 1024 } }],
-        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+        {
+          compress: 0.9,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        }
       );
       setCapturedUri(manip.uri);
+      setCapturedBase64(manip.base64 || null);
       setIsRealPhoto(true);
       setSelectedSampleId(null);
       setUploadError(null);
       setAiSheetBase64(null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    } catch (err) {
-      setCapturedUri(uri);
-      setIsRealPhoto(true);
-      setSelectedSampleId(null);
+    } catch (err: any) {
+      Alert.alert('Image Error', err?.message || 'Could not process selected photo.');
     }
   };
 
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission Needed', 'Camera access is required to scan an object.');
+      Alert.alert('Permission Needed', 'Camera access is required to snap an object.');
       return;
     }
     const res = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 1 });
@@ -325,7 +291,7 @@ export default function WorkflowScreen() {
   const pickFromGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission Needed', 'Photo library access is required to upload a photo.');
+      Alert.alert('Permission Needed', 'Photo library access is required to choose an image.');
       return;
     }
     const res = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, quality: 1 });
@@ -334,15 +300,17 @@ export default function WorkflowScreen() {
     }
   };
 
+  // ── Step 2 JSON Base64 Upload & Assets Fetch ────────────────────────────────
+
   const runRealPhotoUpload = async () => {
-    if (!capturedUri) return;
+    if (!capturedUri || !capturedBase64) return;
     setIsProcessingUpload(true);
     setUploadError(null);
-    setUploadProgress(10);
-    setUploadProgressDesc('Uploading photo to FastAPI segmentation pipeline...');
+    setUploadProgress(15);
+    setUploadProgressDesc('Sending compressed photo to FastAPI...');
 
     try {
-      const scanRes = await uploadScan(capturedUri, 'image/jpeg', 'scan.jpg');
+      const scanRes = await uploadScanBase64(capturedBase64, 'image/jpeg', 'scan.jpg');
       setProjectId(scanRes.project_id);
 
       await pollJobUntilDone(scanRes.job_id, (prog, desc) => {
@@ -350,29 +318,22 @@ export default function WorkflowScreen() {
         setUploadProgressDesc(desc);
       });
 
-      setUploadProgressDesc('Downloading transparent cutout & vector contour...');
+      setUploadProgressDesc('Loading full-res transparent cutout...');
       const assets = await getProjectAssets(scanRes.project_id);
 
-      const finalImg = assets.polished_base64 || assets.trimmed_base64 || assets.preview_base64;
-      if (!finalImg) {
-        throw new Error('Server finished pipeline but did not return a cutout PNG.');
+      // Prefer sharp full-res trimmed_base64 (up to 1024px) over 512px preview
+      const sharpImg = assets.polished_base64 || assets.trimmed_base64 || assets.preview_base64;
+      if (!sharpImg) {
+        throw new Error('Server completed processing but returned no cutout PNG.');
       }
 
-      setCutoutBase64(finalImg);
-      setModelName(assets.suggested_name || assets.object_name || 'Custom Paper Craft');
+      setCutoutBase64(sharpImg);
+      setModelName(assets.suggested_name || assets.object_name || 'Custom Craft');
       setCategory(assets.category || 'Everyday');
-      setHeightCm(Math.max(10, Math.min(35, Math.round(assets.estimated_height_cm || 18))));
+      setHeightCm(Math.max(12, Math.min(24, Math.round(assets.estimated_height_cm || 18))));
       setEdgeColorHex(assets.edge_color || '#2ec4b6');
-      setEngineUsed(assets.engine_used || 'RMBG-ONNX');
       setAiSource(assets.ai_source || 'fallback');
       setAiWarning(assets.ai_warning || null);
-
-      if (assets.quality_metrics) {
-        setSolidity(Math.round((assets.quality_metrics.solidity || 0.85) * 100));
-        setSharpness(Math.round(assets.quality_metrics.sharpness || 85));
-        const cropQual = assets.quality_metrics.crop_edge_quality ?? 1;
-        setCropStatus(cropQual >= 0.85 ? 'Clean ✓' : 'Edge Cropped');
-      }
 
       if (assets.contour?.points?.length) {
         setContour(normalizeContourPoints(assets.contour.points));
@@ -383,8 +344,7 @@ export default function WorkflowScreen() {
       await checkAndUnlockBadges(2);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err: any) {
-      // NEVER silently fall back to Demo Mode on a real photo
-      setUploadError(err?.message || 'Failed to upload or process photo on backend.');
+      setUploadError(err?.message || 'Could not process real photo on server.');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setIsProcessingUpload(false);
@@ -393,26 +353,22 @@ export default function WorkflowScreen() {
 
   const confirmCaptureAndLift = async () => {
     if (isRealPhoto && capturedUri) {
-      setCurrentStage(2);
+      setCurrentStep(2);
       await runRealPhotoUpload();
     } else if (selectedSampleId) {
       applySampleTemplate(selectedSampleId as keyof typeof SAMPLE_TEMPLATES);
       await incrementScanned();
-      await goToStage(2);
+      await goToStep(2);
     }
   };
-
-  // ── Stage 2 Polish ───────────────────────────────────────────────────────────
 
   const handlePolish = async () => {
     if (!isRealPhoto) return;
     setIsPolishing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const res = await triggerPolish(projectId, cropStatus.includes('Clean') ? [] : ['edges']);
-      if (res.polished_base64) {
-        setCutoutBase64(res.polished_base64);
-      }
+      const res = await triggerPolish(projectId, ['edges']);
+      if (res.polished_base64) setCutoutBase64(res.polished_base64);
       if (res.contour?.points?.length) {
         setContour(normalizeContourPoints(res.contour.points));
         setPerimeterMm(res.contour.perimeter_mm || perimeterMm);
@@ -421,37 +377,18 @@ export default function WorkflowScreen() {
       setAiSource(res.ai_source || 'fallback');
       setAiWarning(res.ai_warning || null);
       if (res.ai_source === 'gemini') {
-        setCropStatus('Healed ✓');
-        Alert.alert('✨ Gemini Polish Applied', 'Cropped edges healed & cutout colors sharpened!');
+        Alert.alert('✨ AI Polish Applied', 'Cutout sharpened & edges healed!');
       } else if (res.ai_warning) {
-        Alert.alert('Gemini Polish Notice', res.ai_warning);
+        Alert.alert('AI Polish Notice', res.ai_warning);
       }
     } catch (err: any) {
-      Alert.alert('Polish Error', err?.message || 'Failed to run Gemini polish.');
+      Alert.alert('Polish Error', err?.message || 'Failed to polish cutout.');
     } finally {
       setIsPolishing(false);
     }
   };
 
-  // ── Stage 3 Smoothness Change ────────────────────────────────────────────────
-
-  const handleChangeSmoothness = async (nextSmooth: 'Easy' | 'Medium' | 'Hard') => {
-    setSmoothness(nextSmooth);
-    if (isRealPhoto && projectId) {
-      try {
-        const assets = await getProjectAssets(projectId, {
-          smoothness: nextSmooth,
-          heightCm,
-        });
-        if (assets.contour?.points?.length) {
-          setContour(normalizeContourPoints(assets.contour.points));
-          setPerimeterMm(assets.perimeter_mm || assets.contour.perimeter_mm || perimeterMm);
-        }
-      } catch {}
-    }
-  };
-
-  // ── Stage 5 Print & AI Sheet ─────────────────────────────────────────────────
+  // ── Step 4 Print, FileSystem Share & Gemini Sheet ───────────────────────────
 
   const handleGenerateAiSheet = async () => {
     setIsGeneratingSheet(true);
@@ -467,12 +404,12 @@ export default function WorkflowScreen() {
         }
         setAiSheetWarning(res.ai_warning || null);
       } else {
-        // Sample template preview sheet
-        setAiSheetWarning('Demo template uses vector Pages 1 & 2; scan a real object with GEMINI_API_KEY configured to generate an AI illustrated sheet.');
-        setAiSheetBase64(null);
+        setAiSheetWarning(
+          'Sample crafts use exact-scale Sheet 1 & Sheet 2 vectors; scan a real object with GEMINI_API_KEY configured for AI-illustrated sheets.'
+        );
       }
     } catch (err: any) {
-      setAiSheetWarning(err?.message || 'Failed to generate AI cutout sheet.');
+      setAiSheetWarning(err?.message || 'Could not generate AI sheet.');
     } finally {
       setIsGeneratingSheet(false);
     }
@@ -486,7 +423,7 @@ export default function WorkflowScreen() {
       paperSize,
       heightCm,
       depthCm,
-      moldStyle,
+      moldStyle: 'block',
       includeStand,
       edgeColorHex,
       perimeterMm,
@@ -501,8 +438,8 @@ export default function WorkflowScreen() {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const html = await buildPdfHtml();
-      await Print.printAsync({ html });
-      await checkAndUnlockBadges(5);
+      await printHtmlDirectly(html);
+      await checkAndUnlockBadges(4);
     } catch (err: any) {
       Alert.alert('Print Error', err?.message || 'Could not open system print dialog.');
     } finally {
@@ -515,38 +452,38 @@ export default function WorkflowScreen() {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const html = await buildPdfHtml();
-      const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, {
-        UTI: '.pdf',
-        mimeType: 'application/pdf',
-        dialogTitle: `Foldly - ${modelName} (${paperSize}).pdf`,
-      });
-      await checkAndUnlockBadges(5);
+      await sharePrintablePdf(html, modelName, paperSize);
+      await checkAndUnlockBadges(4);
     } catch (err: any) {
-      Alert.alert('PDF Export Error', err?.message || 'Could not generate PDF file.');
+      Alert.alert('PDF Export Error', err?.message || 'Could not share PDF file.');
     } finally {
       setIsSharing(false);
     }
   };
 
-  const handleFinishCraft = async () => {
-    await updateCreation(projectId, { status: 'Built', buildStep: 6 });
-    await persistProgress('Built', 6);
+  const handleMarkDone = async () => {
+    await updateCreation(projectId, { status: 'Built', buildStep: 5 });
+    await persistProgress('Built', 4);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert(
-      '🎉 Awesome Craft!',
-      `"${modelName}" is finished and saved to My Creations!`,
+      '🎉 Craft Complete!',
+      `"${modelName}" is marked Built and saved in Creations!`,
       [{ text: 'View Creations', onPress: () => router.replace('/(tabs)/creations') }]
     );
   };
 
   return (
     <CuttingMatBackground showTopRuler={false}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Workflow Header */}
-        <View style={styles.wfHeader}>
+      <View style={styles.flexOne}>
+        {/* Header with explicit SafeAreaInsets */}
+        <View
+          style={[
+            styles.wfHeader,
+            { paddingTop: Math.max(insets.top, 28) + 8 },
+          ]}
+        >
           <TouchableOpacity
-            onPress={() => (currentStage > 1 ? setCurrentStage((s) => s - 1) : router.back())}
+            onPress={() => (currentStep > 1 ? setCurrentStep((s) => s - 1) : router.back())}
             style={styles.iconBtn}
           >
             <ChevronLeft size={20} color={Colors.inkOnMat} />
@@ -554,10 +491,7 @@ export default function WorkflowScreen() {
 
           <View style={styles.headerCenter}>
             <Text style={styles.wfTitle} numberOfLines={1}>
-              {STAGE_TITLES[currentStage]}
-            </Text>
-            <Text style={styles.wfSub} numberOfLines={1}>
-              Neural Lift → Crisp 3D → Exact-Scale Print
+              {STEP_TITLES[currentStep]}
             </Text>
           </View>
 
@@ -566,15 +500,15 @@ export default function WorkflowScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* 6-Dot Stage Stepper */}
-        <View style={styles.stageStepper}>
-          {[1, 2, 3, 4, 5, 6].map((st) => (
+        {/* Clean 4-Step Progress Dots */}
+        <View style={styles.stepperRow}>
+          {[1, 2, 3, 4].map((st) => (
             <View
               key={st}
               style={[
-                styles.stageDot,
-                st < currentStage && styles.stageDotDone,
-                st === currentStage && styles.stageDotActive,
+                styles.stepDot,
+                st < currentStep && styles.stepDotDone,
+                st === currentStep && styles.stepDotActive,
               ]}
             />
           ))}
@@ -582,11 +516,14 @@ export default function WorkflowScreen() {
 
         <ScrollView
           scrollEnabled={!scrollLocked}
-          contentContainerStyle={styles.scrollBody}
+          contentContainerStyle={[
+            styles.scrollBody,
+            { paddingBottom: Math.max(insets.bottom, 16) + 24 },
+          ]}
           showsVerticalScrollIndicator={false}
         >
-          {currentStage === 1 && (
-            <Stage1Capture
+          {currentStep === 1 && (
+            <Step1Snap
               capturedUri={capturedUri}
               selectedSampleId={selectedSampleId}
               modelName={modelName}
@@ -595,6 +532,7 @@ export default function WorkflowScreen() {
               onSelectSample={(id) => applySampleTemplate(id)}
               onRetake={() => {
                 setCapturedUri(null);
+                setCapturedBase64(null);
                 setIsRealPhoto(false);
                 setSelectedSampleId('crossing');
               }}
@@ -602,81 +540,51 @@ export default function WorkflowScreen() {
             />
           )}
 
-          {currentStage === 2 && (
-            <Stage2Lift
-              originalPhotoUri={capturedUri}
+          {currentStep === 2 && (
+            <Step2Cutout
               cutoutUri={cutoutBase64}
               sampleId={selectedSampleId}
               isRealPhoto={isRealPhoto}
               modelName={modelName}
-              category={category}
-              estMinutes={estMinutes}
-              edgeColorHex={edgeColorHex}
-              engineUsed={engineUsed}
               aiSource={aiSource}
               aiWarning={aiWarning}
-              solidity={solidity}
-              sharpness={sharpness}
-              cropStatus={cropStatus}
-              dieCutBorder={dieCutBorder}
               isProcessingUpload={isProcessingUpload}
               uploadProgress={uploadProgress}
               uploadProgressDesc={uploadProgressDesc}
               isPolishing={isPolishing}
               uploadError={uploadError}
-              onToggleDieCut={() => setDieCutBorder((v) => !v)}
-              onRename={(name) => setModelName(name)}
+              onChangeName={setModelName}
               onPolish={handlePolish}
               onRetryScan={runRealPhotoUpload}
               onEditServerUrl={() => setServerModalOpen(true)}
-              onBack={() => setCurrentStage(1)}
-              onNext={() => goToStage(3)}
-              onScrollLock={setScrollLocked}
+              onRetake={() => setCurrentStep(1)}
+              onNext={() => goToStep(3)}
             />
           )}
 
-          {currentStage === 3 && (
-            <Stage3Preview3D
+          {currentStep === 3 && (
+            <Step3Studio3D
               artworkUri={activeArtworkUri}
               contour={contour}
               edgeColorHex={edgeColorHex}
-              moldStyle={moldStyle}
               heightCm={heightCm}
               depthCm={depthCm}
-              smoothness={smoothness}
               includeStand={includeStand}
-              onChangeMoldStyle={setMoldStyle}
               onChangeHeight={setHeightCm}
-              onChangeDepth={setDepthCm}
-              onChangeSmoothness={handleChangeSmoothness}
               onToggleStand={() => setIncludeStand((v) => !v)}
-              onBack={() => setCurrentStage(2)}
-              onNext={() => goToStage(4)}
+              onBack={() => setCurrentStep(2)}
+              onNext={() => goToStep(4)}
               onScrollLock={setScrollLocked}
             />
           )}
 
-          {currentStage === 4 && (
-            <Stage4Unfold
-              artworkUri={activeArtworkUri}
-              edgeColorHex={edgeColorHex}
-              includeStand={includeStand}
-              unfoldProgress={unfoldProgress}
-              onChangeProgress={setUnfoldProgress}
-              onBack={() => setCurrentStage(3)}
-              onNext={() => goToStage(5)}
-              onScrollLock={setScrollLocked}
-            />
-          )}
-
-          {currentStage === 5 && (
-            <Stage5Print
+          {currentStep === 4 && (
+            <Step4Print
               modelName={modelName}
               category={category}
               paperSize={paperSize}
               heightCm={heightCm}
               depthCm={depthCm}
-              moldStyle={moldStyle}
               includeStand={includeStand}
               edgeColorHex={edgeColorHex}
               perimeterMm={perimeterMm}
@@ -689,6 +597,8 @@ export default function WorkflowScreen() {
               isGeneratingSheet={isGeneratingSheet}
               isPrinting={isPrinting}
               isSharing={isSharing}
+              glueTimerSec={glueTimerSec}
+              isTimerRunning={isTimerRunning}
               onChangePaperSize={(sz) => {
                 setPaperSize(sz);
                 setPaperPreference(sz);
@@ -696,69 +606,43 @@ export default function WorkflowScreen() {
               onGenerateAiSheet={handleGenerateAiSheet}
               onPrint={handlePrintPdf}
               onShare={handleSharePdf}
-              onBack={() => setCurrentStage(4)}
-              onNext={() => {
-                setBuildStepIdx(0);
-                goToStage(6);
-              }}
-            />
-          )}
-
-          {currentStage === 6 && (
-            <Stage6Build
-              modelName={modelName}
-              paperSize={paperSize}
-              moldStyle={moldStyle}
-              includeStand={includeStand}
-              buildTip={buildTip}
-              buildStepIdx={buildStepIdx}
-              glueTimerSec={glueTimerSec}
-              isTimerRunning={isTimerRunning}
-              onChangeStep={(idx) => {
-                setBuildStepIdx(idx);
-                setGlueTimerSec(20);
-                setIsTimerRunning(false);
-                updateCreation(projectId, { buildStep: idx, status: 'Building' });
-              }}
               onStartTimer={() => {
                 setGlueTimerSec(20);
                 setIsTimerRunning(true);
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
               }}
-              onFinish={handleFinishCraft}
+              onMarkDone={handleMarkDone}
+              onBack={() => setCurrentStep(3)}
             />
           )}
-
-          <View style={{ height: 32 }} />
         </ScrollView>
 
         <ServerUrlModal
           visible={serverModalOpen}
           onClose={() => setServerModalOpen(false)}
         />
-      </SafeAreaView>
+      </View>
     </CuttingMatBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
+  flexOne: { flex: 1 },
   wfHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 15,
-    paddingTop: 14,
-    paddingBottom: 8,
+    paddingBottom: 10,
     gap: 8,
   },
   iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: 'rgba(16, 38, 32, 0.68)',
+    backgroundColor: 'rgba(16, 38, 32, 0.72)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -767,36 +651,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   wfTitle: {
-    fontSize: 17,
+    fontSize: 17.5,
     fontWeight: '800',
     color: Colors.inkOnMat,
   },
-  wfSub: {
-    fontSize: 10.5,
-    color: Colors.sage,
-    marginTop: 1,
-  },
-  stageStepper: {
+  stepperRow: {
     flexDirection: 'row',
-    gap: 5,
+    gap: 6,
     paddingHorizontal: 15,
-    paddingBottom: 10,
+    paddingBottom: 12,
   },
-  stageDot: {
+  stepDot: {
     flex: 1,
     height: 5,
     borderRadius: 99,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  stageDotDone: {
+  stepDotDone: {
     backgroundColor: Colors.teal,
   },
-  stageDotActive: {
+  stepDotActive: {
     backgroundColor: Colors.ruler,
   },
   scrollBody: {
     paddingHorizontal: 15,
     paddingTop: 4,
-    paddingBottom: 28,
   },
 });
