@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SvgXml } from 'react-native-svg';
 import { Trash2 } from 'lucide-react-native';
 import { Colors, Typography } from '../../constants/theme';
@@ -91,61 +92,65 @@ export default function CreationsScreen() {
           </PaperSheet>
         ) : (
           <View style={styles.grid}>
-            {creations.map((c) => {
+            {creations.map((c, idx) => {
               const tpl = c.sampleId
                 ? SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]
                 : null;
               return (
-                <TouchableOpacity
+                <Animated.View
                   key={c.id}
-                  activeOpacity={0.88}
-                  onPress={() => openCreation(c)}
+                  entering={FadeInDown.duration(280).delay(idx * 45).springify()}
                   style={styles.gridItem}
                 >
-                  <PaperSheet style={styles.card}>
-                    <TouchableOpacity
-                      onPress={() => setPendingDelete(c)}
-                      style={styles.delBtn}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Trash2 size={14} color={Colors.cut} />
-                    </TouchableOpacity>
-
-                    <View style={styles.thumbBox}>
-                      {c.trimmedBase64 || c.trimmedUrl ? (
-                        <Image
-                          source={{ uri: c.trimmedBase64 || c.trimmedUrl || '' }}
-                          style={{ width: 82, height: 82 }}
-                          resizeMode="contain"
-                        />
-                      ) : tpl ? (
-                        <SvgXml xml={tpl.svgMarkup} width={82} height={82} />
-                      ) : (
-                        <Text style={{ fontSize: 34 }}>✂️</Text>
-                      )}
-                    </View>
-
-                    <Text style={styles.cardTitle} numberOfLines={1}>
-                      {c.name}
-                    </Text>
-
-                    <View style={styles.cardMetaRow}>
-                      <Text style={styles.cardMeta}>{c.heightCm} cm</Text>
-                      <View
-                        style={[
-                          styles.statusTag,
-                          c.status === 'Built'
-                            ? styles.tagBuilt
-                            : c.status === 'Building'
-                            ? styles.tagBuilding
-                            : styles.tagReady,
-                        ]}
+                  <TouchableOpacity
+                    activeOpacity={0.88}
+                    onPress={() => openCreation(c)}
+                  >
+                    <PaperSheet style={styles.card}>
+                      <TouchableOpacity
+                        onPress={() => setPendingDelete(c)}
+                        style={styles.delBtn}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       >
-                        <Text style={styles.statusTagText}>{c.status}</Text>
+                        <Trash2 size={14} color={Colors.cut} />
+                      </TouchableOpacity>
+
+                      <View style={styles.thumbBox}>
+                        {c.trimmedBase64 || c.trimmedUrl ? (
+                          <Image
+                            source={{ uri: c.trimmedBase64 || c.trimmedUrl || '' }}
+                            style={{ width: 82, height: 82 }}
+                            resizeMode="contain"
+                          />
+                        ) : tpl ? (
+                          <SvgXml xml={tpl.svgMarkup} width={82} height={82} />
+                        ) : (
+                          <Text style={{ fontSize: 34 }}>✂️</Text>
+                        )}
                       </View>
-                    </View>
-                  </PaperSheet>
-                </TouchableOpacity>
+
+                      <Text style={styles.cardTitle} numberOfLines={1}>
+                        {c.name}
+                      </Text>
+
+                      <View style={styles.cardMetaRow}>
+                        <Text style={styles.cardMeta}>{c.heightCm} cm</Text>
+                        <View
+                          style={[
+                            styles.statusTag,
+                            c.status === 'Built'
+                              ? styles.tagBuilt
+                              : c.status === 'Building'
+                              ? styles.tagBuilding
+                              : styles.tagReady,
+                          ]}
+                        >
+                          <Text style={styles.statusTagText}>{c.status}</Text>
+                        </View>
+                      </View>
+                    </PaperSheet>
+                  </TouchableOpacity>
+                </Animated.View>
               );
             })}
           </View>

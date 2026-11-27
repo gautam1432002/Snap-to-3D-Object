@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  TouchableOpacity,
+  Pressable,
   Text,
   StyleSheet,
   ViewStyle,
@@ -8,6 +8,12 @@ import {
   ActivityIndicator,
   StyleProp,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { Colors } from '../constants/theme';
 
 export type CraftButtonVariant = 'primary' | 'paper' | 'teal' | 'alt' | 'danger';
@@ -24,8 +30,11 @@ interface CraftButtonProps {
   textStyle?: StyleProp<TextStyle>;
 }
 
+const PRESS_SPRING = { damping: 16, stiffness: 260, mass: 0.7 };
+
 /**
- * Tactile 3D craft push-button matching `.btn` variants from the HTML prototype.
+ * Tactile 3D craft push-button with UI-thread Reanimated spring press physics
+ * (`scale: 0.965`, `translateY: 2`) and subtle light haptic feedback.
  */
 export function CraftButton({
   title,
@@ -38,6 +47,16 @@ export function CraftButton({
   style,
   textStyle,
 }: CraftButtonProps) {
+  const pressed = useSharedValue(0);
+
+  const animStyle = useAnimatedStyle(() => {
+    const scale = 1 - pressed.value * 0.035; // 1 -> 0.965
+    const translateY = pressed.value * 2;    // 0 -> 2
+    return {
+      transform: [{ scale }, { translateY }],
+    };
+  });
+
   const isDashed = variant === 'alt';
 
   const variantStyle =
@@ -58,42 +77,56 @@ export function CraftButton({
       ? styles.textWhite
       : styles.textInk;
 
+  const isDisabled = disabled || loading;
+
+  const handlePressIn = () => {
+    if (isDisabled) return;
+    pressed.value = withSpring(1, PRESS_SPRING);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  };
+
+  const handlePressOut = () => {
+    pressed.value = withSpring(0, PRESS_SPRING);
+  };
+
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={disabled || loading}
-      activeOpacity={0.82}
-      style={[
-        styles.base,
-        small && styles.small,
-        variantStyle,
-        isDashed && styles.altBorder,
-        (disabled || loading) && styles.disabled,
-        style,
-      ]}
-    >
-      {loading ? (
-        <ActivityIndicator
-          size="small"
-          color={variant === 'alt' || variant === 'danger' ? '#ffffff' : Colors.ink}
-        />
-      ) : (
-        <>
-          {icon}
-          <Text
-            style={[
-              styles.text,
-              small && styles.textSmall,
-              variantText,
-              textStyle,
-            ]}
-            numberOfLines={1}
-          >
-            {title}
-          </Text>
-        </>
-      )}
-    </TouchableOpacity>
+    <Animated.View style={[style, animStyle]}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        disabled={isDisabled}
+        style={[
+          styles.base,
+          small && styles.small,
+          variantStyle,
+          isDashed && styles.altBorder,
+          isDisabled && styles.disabled,
+        ]}
+      >
+        {loading ? (
+          <ActivityIndicator
+            size="small"
+            color={variant === 'alt' || variant === 'danger' ? '#ffffff' : Colors.ink}
+          />
+        ) : (
+          <>
+            {icon}
+            <Text
+              style={[
+                styles.text,
+                small && styles.textSmall,
+                variantText,
+                textStyle,
+              ]}
+              numberOfLines={1}
+            >
+              {title}
+            </Text>
+          </>
+        )}
+      </Pressable>
+    </Animated.View>
   );
 }
 

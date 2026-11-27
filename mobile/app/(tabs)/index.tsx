@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SvgXml } from 'react-native-svg';
 import { Colors, Typography } from '../../constants/theme';
 import { CuttingMatBackground } from '../../components/CuttingMatBackground';
@@ -182,23 +183,27 @@ export default function HomeScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.hScroll}
         >
-          {DEMO_SAMPLES.map((s) => {
+          {DEMO_SAMPLES.map((s, idx) => {
             const tpl = SAMPLE_TEMPLATES[(s.sampleId || 'crossing') as keyof typeof SAMPLE_TEMPLATES];
             return (
-              <TouchableOpacity
+              <Animated.View
                 key={s.id}
-                activeOpacity={0.85}
-                onPress={() => launchTemplate(tpl.id)}
-                style={styles.tplCard}
+                entering={FadeInDown.duration(280).delay(idx * 45).springify()}
               >
-                <View style={styles.tplSvgWrap}>
-                  <SvgXml xml={tpl.svgMarkup} width={54} height={54} />
-                </View>
-                <Text style={styles.tplTitle} numberOfLines={1}>
-                  {tpl.shortName}
-                </Text>
-                <Text style={styles.tplSub}>{tpl.heightCm} cm</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => launchTemplate(tpl.id)}
+                  style={styles.tplCard}
+                >
+                  <View style={styles.tplSvgWrap}>
+                    <SvgXml xml={tpl.svgMarkup} width={54} height={54} />
+                  </View>
+                  <Text style={styles.tplTitle} numberOfLines={1}>
+                    {tpl.shortName}
+                  </Text>
+                  <Text style={styles.tplSub}>{tpl.heightCm} cm</Text>
+                </TouchableOpacity>
+              </Animated.View>
             );
           })}
         </ScrollView>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,15 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import Svg, { Defs, Pattern, Rect, SvgXml } from 'react-native-svg';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSequence,
+  withTiming,
+  withSpring,
+  Easing,
+} from 'react-native-reanimated';
 import { Colors } from '../../constants/theme';
 import { PaperSheet } from '../PaperSheet';
 import { CraftButton } from '../CraftButton';
@@ -57,6 +66,35 @@ export function Step2Cutout({
       ? SAMPLE_TEMPLATES[sampleId as keyof typeof SAMPLE_TEMPLATES]
       : null;
 
+  const liftScale = useSharedValue(1);
+  const shimmerX = useSharedValue(-220);
+
+  const isReady = !isProcessingUpload && !uploadError && (!!cutoutUri || !!activeSample);
+
+  useEffect(() => {
+    if (!isReady) return;
+    // Subject Lift pop: 0.94 -> 1.03 -> 1.0
+    liftScale.value = withSequence(
+      withTiming(0.94, { duration: 40 }),
+      withSpring(1.03, { damping: 11, stiffness: 240 }),
+      withSpring(1.0, { damping: 16, stiffness: 180 })
+    );
+    // Diagonal light shimmer sweep
+    shimmerX.value = -220;
+    shimmerX.value = withTiming(420, {
+      duration: 680,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [isReady, cutoutUri]);
+
+  const liftStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: liftScale.value }],
+  }));
+
+  const shimmerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shimmerX.value }, { rotate: '22deg' }],
+  }));
+
   return (
     <View style={styles.container}>
       {/* Clean Checkerboard Cutout Preview */}
@@ -91,19 +129,38 @@ export function Step2Cutout({
             <Text style={styles.errorTitle}>Scan Failed</Text>
             <Text style={styles.errorDesc}>{uploadError}</Text>
           </View>
-        ) : cutoutUri && !activeSample ? (
-          <View style={styles.centerBox}>
-            <Image
-              source={{ uri: cutoutUri }}
-              style={styles.cutoutImg}
-              resizeMode="contain"
-            />
+        ) : (
+          <Animated.View style={[styles.centerBox, liftStyle]}>
+            {cutoutUri && !activeSample ? (
+              <Image
+                source={{ uri: cutoutUri }}
+                style={styles.cutoutImg}
+                resizeMode="contain"
+              />
+            ) : activeSample ? (
+              <SvgXml xml={activeSample.svgMarkup} width={185} height={185} />
+            ) : null}
+          </Animated.View>
+        )}
+
+        {/* Diagonal Light Shimmer Sweep Overlay */}
+        {isReady && (
+          <View pointerEvents="none" style={styles.shimmerClip}>
+            <Animated.View style={[styles.shimmerBeam, shimmerStyle]}>
+              <LinearGradient
+                colors={[
+                  'rgba(255,255,255,0)',
+                  'rgba(255,255,255,0.45)',
+                  'rgba(46,196,182,0.22)',
+                  'rgba(255,255,255,0)',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </Animated.View>
           </View>
-        ) : activeSample ? (
-          <View style={styles.centerBox}>
-            <SvgXml xml={activeSample.svgMarkup} width={185} height={185} />
-          </View>
-        ) : null}
+        )}
       </View>
 
       {/* Actionable Error Card (never fakes Demo Mode on real photo) */}
@@ -201,6 +258,20 @@ const styles = StyleSheet.create({
   cutoutImg: {
     width: '90%',
     height: '90%',
+  },
+  shimmerClip: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    overflow: 'hidden',
+  },
+  shimmerBeam: {
+    position: 'absolute',
+    top: -60,
+    bottom: -60,
+    width: 96,
   },
   progressText: {
     color: Colors.inkOnMat,

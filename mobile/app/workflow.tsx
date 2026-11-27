@@ -10,6 +10,13 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  FadeInRight,
+  FadeInLeft,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
@@ -68,8 +75,27 @@ export default function WorkflowScreen() {
   }>();
 
   const [currentStep, setCurrentStep] = useState<number>(1);
+  const [navDir, setNavDir] = useState<'fwd' | 'back'>('fwd');
   const [scrollLocked, setScrollLocked] = useState<boolean>(false);
   const [serverModalOpen, setServerModalOpen] = useState<boolean>(false);
+
+  const stepProgress = useSharedValue(25);
+  useEffect(() => {
+    stepProgress.value = withSpring((currentStep / 4) * 100, {
+      damping: 18,
+      stiffness: 180,
+      mass: 0.8,
+    });
+  }, [currentStep]);
+
+  const progressFillStyle = useAnimatedStyle(() => ({
+    width: `${stepProgress.value}%`,
+  }));
+
+  const jumpToStep = (next: number) => {
+    setNavDir(next >= currentStep ? 'fwd' : 'back');
+    setCurrentStep(next);
+  };
 
   // Active Craft Metadata
   const [projectId, setProjectId] = useState<string>(`proj_${Date.now()}`);
@@ -142,7 +168,7 @@ export default function WorkflowScreen() {
   useEffect(() => {
     const onBackPress = () => {
       if (currentStep > 1) {
-        setCurrentStep((s) => s - 1);
+        jumpToStep(currentStep - 1);
         return true;
       }
       return false;
@@ -247,7 +273,7 @@ export default function WorkflowScreen() {
 
   const goToStep = async (next: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCurrentStep(next);
+    jumpToStep(next);
     await persistProgress(next === 4 ? 'Building' : 'Ready', next);
   };
 
@@ -353,7 +379,7 @@ export default function WorkflowScreen() {
 
   const confirmCaptureAndLift = async () => {
     if (isRealPhoto && capturedUri) {
-      setCurrentStep(2);
+      jumpToStep(2);
       await runRealPhotoUpload();
     } else if (selectedSampleId) {
       applySampleTemplate(selectedSampleId as keyof typeof SAMPLE_TEMPLATES);
@@ -483,7 +509,7 @@ export default function WorkflowScreen() {
           ]}
         >
           <TouchableOpacity
-            onPress={() => (currentStep > 1 ? setCurrentStep((s) => s - 1) : router.back())}
+            onPress={() => (currentStep > 1 ? jumpToStep(currentStep - 1) : router.back())}
             style={styles.iconBtn}
           >
             <ChevronLeft size={20} color={Colors.inkOnMat} />
@@ -500,18 +526,11 @@ export default function WorkflowScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Clean 4-Step Progress Dots */}
-        <View style={styles.stepperRow}>
-          {[1, 2, 3, 4].map((st) => (
-            <View
-              key={st}
-              style={[
-                styles.stepDot,
-                st < currentStep && styles.stepDotDone,
-                st === currentStep && styles.stepDotActive,
-              ]}
-            />
-          ))}
+        {/* Animated 4-Step Progress Bar */}
+        <View style={styles.progressTrackWrap}>
+          <View style={styles.progressTrack}>
+            <Animated.View style={[styles.progressFill, progressFillStyle]} />
+          </View>
         </View>
 
         <ScrollView
@@ -522,99 +541,104 @@ export default function WorkflowScreen() {
           ]}
           showsVerticalScrollIndicator={false}
         >
-          {currentStep === 1 && (
-            <Step1Snap
-              capturedUri={capturedUri}
-              selectedSampleId={selectedSampleId}
-              modelName={modelName}
-              onTakePhoto={takePhoto}
-              onPickGallery={pickFromGallery}
-              onSelectSample={(id) => applySampleTemplate(id)}
-              onRetake={() => {
-                setCapturedUri(null);
-                setCapturedBase64(null);
-                setIsRealPhoto(false);
-                setSelectedSampleId('crossing');
-              }}
-              onConfirm={confirmCaptureAndLift}
-            />
-          )}
+          <Animated.View
+            key={currentStep}
+            entering={(navDir === 'fwd' ? FadeInRight : FadeInLeft).duration(220)}
+          >
+            {currentStep === 1 && (
+              <Step1Snap
+                capturedUri={capturedUri}
+                selectedSampleId={selectedSampleId}
+                modelName={modelName}
+                onTakePhoto={takePhoto}
+                onPickGallery={pickFromGallery}
+                onSelectSample={(id) => applySampleTemplate(id)}
+                onRetake={() => {
+                  setCapturedUri(null);
+                  setCapturedBase64(null);
+                  setIsRealPhoto(false);
+                  setSelectedSampleId('crossing');
+                }}
+                onConfirm={confirmCaptureAndLift}
+              />
+            )}
 
-          {currentStep === 2 && (
-            <Step2Cutout
-              cutoutUri={cutoutBase64}
-              sampleId={selectedSampleId}
-              isRealPhoto={isRealPhoto}
-              modelName={modelName}
-              aiSource={aiSource}
-              aiWarning={aiWarning}
-              isProcessingUpload={isProcessingUpload}
-              uploadProgress={uploadProgress}
-              uploadProgressDesc={uploadProgressDesc}
-              isPolishing={isPolishing}
-              uploadError={uploadError}
-              onChangeName={setModelName}
-              onPolish={handlePolish}
-              onRetryScan={runRealPhotoUpload}
-              onEditServerUrl={() => setServerModalOpen(true)}
-              onRetake={() => setCurrentStep(1)}
-              onNext={() => goToStep(3)}
-            />
-          )}
+            {currentStep === 2 && (
+              <Step2Cutout
+                cutoutUri={cutoutBase64}
+                sampleId={selectedSampleId}
+                isRealPhoto={isRealPhoto}
+                modelName={modelName}
+                aiSource={aiSource}
+                aiWarning={aiWarning}
+                isProcessingUpload={isProcessingUpload}
+                uploadProgress={uploadProgress}
+                uploadProgressDesc={uploadProgressDesc}
+                isPolishing={isPolishing}
+                uploadError={uploadError}
+                onChangeName={setModelName}
+                onPolish={handlePolish}
+                onRetryScan={runRealPhotoUpload}
+                onEditServerUrl={() => setServerModalOpen(true)}
+                onRetake={() => jumpToStep(1)}
+                onNext={() => goToStep(3)}
+              />
+            )}
 
-          {currentStep === 3 && (
-            <Step3Studio3D
-              artworkUri={activeArtworkUri}
-              contour={contour}
-              edgeColorHex={edgeColorHex}
-              heightCm={heightCm}
-              depthCm={depthCm}
-              includeStand={includeStand}
-              onChangeHeight={setHeightCm}
-              onToggleStand={() => setIncludeStand((v) => !v)}
-              onBack={() => setCurrentStep(2)}
-              onNext={() => goToStep(4)}
-              onScrollLock={setScrollLocked}
-            />
-          )}
+            {currentStep === 3 && (
+              <Step3Studio3D
+                artworkUri={activeArtworkUri}
+                contour={contour}
+                edgeColorHex={edgeColorHex}
+                heightCm={heightCm}
+                depthCm={depthCm}
+                includeStand={includeStand}
+                onChangeHeight={setHeightCm}
+                onToggleStand={() => setIncludeStand((v) => !v)}
+                onBack={() => jumpToStep(2)}
+                onNext={() => goToStep(4)}
+                onScrollLock={setScrollLocked}
+              />
+            )}
 
-          {currentStep === 4 && (
-            <Step4Print
-              modelName={modelName}
-              category={category}
-              paperSize={paperSize}
-              heightCm={heightCm}
-              depthCm={depthCm}
-              includeStand={includeStand}
-              edgeColorHex={edgeColorHex}
-              perimeterMm={perimeterMm}
-              contour={contour}
-              artworkUri={activeArtworkUri}
-              sampleId={selectedSampleId}
-              isRealPhoto={isRealPhoto}
-              aiSheetBase64={aiSheetBase64}
-              aiSheetWarning={aiSheetWarning}
-              isGeneratingSheet={isGeneratingSheet}
-              isPrinting={isPrinting}
-              isSharing={isSharing}
-              glueTimerSec={glueTimerSec}
-              isTimerRunning={isTimerRunning}
-              onChangePaperSize={(sz) => {
-                setPaperSize(sz);
-                setPaperPreference(sz);
-              }}
-              onGenerateAiSheet={handleGenerateAiSheet}
-              onPrint={handlePrintPdf}
-              onShare={handleSharePdf}
-              onStartTimer={() => {
-                setGlueTimerSec(20);
-                setIsTimerRunning(true);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-              }}
-              onMarkDone={handleMarkDone}
-              onBack={() => setCurrentStep(3)}
-            />
-          )}
+            {currentStep === 4 && (
+              <Step4Print
+                modelName={modelName}
+                category={category}
+                paperSize={paperSize}
+                heightCm={heightCm}
+                depthCm={depthCm}
+                includeStand={includeStand}
+                edgeColorHex={edgeColorHex}
+                perimeterMm={perimeterMm}
+                contour={contour}
+                artworkUri={activeArtworkUri}
+                sampleId={selectedSampleId}
+                isRealPhoto={isRealPhoto}
+                aiSheetBase64={aiSheetBase64}
+                aiSheetWarning={aiSheetWarning}
+                isGeneratingSheet={isGeneratingSheet}
+                isPrinting={isPrinting}
+                isSharing={isSharing}
+                glueTimerSec={glueTimerSec}
+                isTimerRunning={isTimerRunning}
+                onChangePaperSize={(sz) => {
+                  setPaperSize(sz);
+                  setPaperPreference(sz);
+                }}
+                onGenerateAiSheet={handleGenerateAiSheet}
+                onPrint={handlePrintPdf}
+                onShare={handleSharePdf}
+                onStartTimer={() => {
+                  setGlueTimerSec(20);
+                  setIsTimerRunning(true);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                }}
+                onMarkDone={handleMarkDone}
+                onBack={() => jumpToStep(3)}
+              />
+            )}
+          </Animated.View>
         </ScrollView>
 
         <ServerUrlModal
@@ -655,22 +679,19 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.inkOnMat,
   },
-  stepperRow: {
-    flexDirection: 'row',
-    gap: 6,
+  progressTrackWrap: {
     paddingHorizontal: 15,
     paddingBottom: 12,
   },
-  stepDot: {
-    flex: 1,
-    height: 5,
+  progressTrack: {
+    height: 6,
     borderRadius: 99,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    overflow: 'hidden',
   },
-  stepDotDone: {
-    backgroundColor: Colors.teal,
-  },
-  stepDotActive: {
+  progressFill: {
+    height: '100%',
+    borderRadius: 99,
     backgroundColor: Colors.ruler,
   },
   scrollBody: {

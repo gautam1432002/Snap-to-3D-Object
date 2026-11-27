@@ -1,17 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Platform,
-  Animated,
   LayoutChangeEvent,
 } from 'react-native';
 import { BottomTabBarProps } from 'expo-router/tabs';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from 'react-native-reanimated';
 import { Home, Layers, Settings } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
@@ -39,10 +43,34 @@ const TABS: TabItemConfig[] = [
   },
 ];
 
+const SPRING_CONFIG = { damping: 18, stiffness: 180, mass: 0.8 };
+
+function AnimatedTabIcon({
+  isFocused,
+  children,
+}: {
+  isFocused: boolean;
+  children: React.ReactNode;
+}) {
+  const scale = useSharedValue(isFocused ? 1.08 : 1);
+  const translateY = useSharedValue(isFocused ? -1.5 : 0);
+
+  useEffect(() => {
+    scale.value = withSpring(isFocused ? 1.08 : 1, SPRING_CONFIG);
+    translateY.value = withSpring(isFocused ? -1.5 : 0, SPRING_CONFIG);
+  }, [isFocused]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }, { translateY: translateY.value }],
+  }));
+
+  return <Animated.View style={[styles.iconContainer, animStyle]}>{children}</Animated.View>;
+}
+
 export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const [rowWidth, setRowWidth] = useState<number>(0);
-  const indicatorX = useRef(new Animated.Value(0)).current;
+  const indicatorX = useSharedValue(0);
 
   const activeRouteName = state.routes[state.index]?.name || 'index';
   const activeVisualIdx = Math.max(
@@ -53,19 +81,18 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
 
   useEffect(() => {
     if (tabWidth <= 0) return;
-    Animated.spring(indicatorX, {
-      toValue: activeVisualIdx * tabWidth,
-      tension: 180,
-      friction: 22,
-      useNativeDriver: true,
-    }).start();
+    indicatorX.value = withSpring(activeVisualIdx * tabWidth, SPRING_CONFIG);
   }, [activeVisualIdx, tabWidth]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorX.value }],
+  }));
 
   const handleLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
     if (w > 0 && Math.abs(w - rowWidth) > 1) {
       setRowWidth(w);
-      indicatorX.setValue(activeVisualIdx * (w / TABS.length));
+      indicatorX.value = activeVisualIdx * (w / TABS.length);
     }
   };
 
@@ -99,10 +126,8 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
               pointerEvents="none"
               style={[
                 styles.slidingGlassPill,
-                {
-                  width: tabWidth,
-                  transform: [{ translateX: indicatorX }],
-                },
+                { width: tabWidth },
+                indicatorStyle,
               ]}
             >
               <LinearGradient
@@ -138,10 +163,12 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
               <TouchableOpacity
                 key={tab.name}
                 onPress={onPress}
-                activeOpacity={0.75}
+                activeOpacity={0.78}
                 style={styles.tabButton}
               >
-                <View style={styles.iconContainer}>{tab.icon(iconColor)}</View>
+                <AnimatedTabIcon isFocused={isFocused}>
+                  {tab.icon(iconColor)}
+                </AnimatedTabIcon>
                 <Text
                   style={[
                     styles.tabLabel,

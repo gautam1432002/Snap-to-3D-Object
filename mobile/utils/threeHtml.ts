@@ -12,10 +12,13 @@ export interface Studio3DPayload {
 }
 
 /**
- * Generates self-contained Three.js r128 WebView combining:
- * 1) Razor-sharp non-puffed ExtrudeGeometry cardstock model (`bevelEnabled: false`,
- *    mipmaps disabled with LinearFilter + max anisotropy for crystal-clear scanned textures)
- * 2) Smooth in-place 3D <-> 2D Unfold controlled by `unfoldProgress` (0% -> 100%)
+ * Generates self-contained Three.js r128 WebView with:
+ * - Custom GLSL cardstock ShaderMaterial (matte grain, abs() view-dependent sheen,
+ *   diagonal reveal shimmer, mipmap-free sharp texture clarity)
+ * - Crisp non-puffed ExtrudeGeometry (`bevelEnabled: false`) + dark EdgesGeometry creases
+ * - Soft radial contact shadow on cutting-mat turntable
+ * - 850ms cubic-ease-out intro swoop + angular momentum inertia + damped unfold/size
+ * - Clean visibilitychange pause/resume
  */
 export function buildStudio3DHtml(initial: Studio3DPayload): string {
   const safeJson = JSON.stringify(initial).replace(/<\/script>/gi, '<\\/script>');
@@ -64,12 +67,11 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
 
   var host = document.getElementById('host');
   var w = window.innerWidth || 340;
-  var h = window.innerHeight || 275;
+  var h = window.innerHeight || 280;
 
   var renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 2, 3));
   renderer.setSize(w, h);
-  renderer.outputEncoding = THREE.sRGBEncoding;
   host.appendChild(renderer.domElement);
 
   var maxAniso = renderer.capabilities && renderer.capabilities.getMaxAnisotropy
@@ -78,9 +80,9 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
 
   var scene = new THREE.Scene();
   var camera = new THREE.PerspectiveCamera(36, w / h, 0.1, 100);
-  camera.position.set(0, 0.18, 6.2);
+  camera.position.set(0, 0.45, 7.6);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 1.08));
+  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
   var dir1 = new THREE.DirectionalLight(0xffffff, 0.55);
   dir1.position.set(3, 5, 6);
   scene.add(dir1);
@@ -88,12 +90,35 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
   dir2.position.set(-4, 2, -5);
   scene.add(dir2);
 
+  // Green cutting-mat turntable pedestal
   var disc = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.75, 1.85, 0.11, 40),
+    new THREE.CylinderGeometry(1.75, 1.85, 0.11, 44),
     new THREE.MeshStandardMaterial({ color: 0x24493e, roughness: 0.85 })
   );
   disc.position.y = -1.62;
   scene.add(disc);
+
+  // Soft contact shadow ellipse on turntable
+  var shadowMesh = (function() {
+    var sc = document.createElement('canvas');
+    sc.width = 256; sc.height = 256;
+    var sctx = sc.getContext('2d');
+    var g = sctx.createRadialGradient(128, 128, 10, 128, 128, 122);
+    g.addColorStop(0, 'rgba(6, 18, 14, 0.54)');
+    g.addColorStop(0.55, 'rgba(6, 18, 14, 0.22)');
+    g.addColorStop(1, 'rgba(6, 18, 14, 0.0)');
+    sctx.fillStyle = g;
+    sctx.fillRect(0, 0, 256, 256);
+    var stex = new THREE.CanvasTexture(sc);
+    var mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.4, 1.35),
+      new THREE.MeshBasicMaterial({ map: stex, transparent: true, depthWrite: false })
+    );
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = -1.555;
+    return mesh;
+  })();
+  scene.add(shadowMesh);
 
   var root = new THREE.Group();
   scene.add(root);
@@ -104,16 +129,69 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
   var backPlane = null;
   var standMesh = null;
   var flatStripMesh = null;
+  var shaderUniforms = [];
 
-  var modelMetrics = { modelW: 2.0, clampedH: 2.4, depth: 0.35 };
-  var rotY = 0.25;
+  var VERT_SHADER = [
+    'varying vec2 vUv;',
+    'varying vec3 vNormal;',
+    'varying vec3 vViewDir;',
+    'void main() {',
+    '  vUv = uv;',
+    '  vec4 mvPos = modelViewMatrix * vec4(position, 1.0);',
+    '  vNormal = normalize(normalMatrix * normal);',
+    '  vViewDir = normalize(-mvPos.xyz);',
+    '  gl_Position = projectionMatrix * mvPos;',
+    '}'
+  ].join('\\n');
+
+  var FRAG_SHADER = [
+    'uniform sampler2D uMap;',
+    'uniform float uReveal;',
+    'varying vec2 vUv;',
+    'varying vec3 vNormal;',
+    'varying vec3 vViewDir;',
+    'float hash21(vec2 p) {',
+    '  p = fract(p * vec2(123.34, 456.21));',
+    '  p += dot(p, p + 45.32);',
+    '  return fract(p.x * p.y);',
+    '}',
+    'void main() {',
+    '  vec4 tex = texture2D(uMap, vUv);',
+    '  if (tex.a < 0.15) discard;',
+    '  float grain = (hash21(vUv * 420.0) - 0.5) * 0.025;',
+    '  vec3 col = tex.rgb + vec3(grain);',
+    '  float ndotv = abs(dot(normalize(vNormal), normalize(vViewDir)));',
+    '  float grazing = pow(1.0 - ndotv, 2.2) * 0.11;',
+    '  float centerSheen = pow(ndotv, 6.0) * 0.03;',
+    '  col += vec3(grazing + centerSheen);',
+    '  if (uReveal < 0.999) {',
+    '    float diag = vUv.x * 0.65 + (1.0 - vUv.y) * 0.35;',
+    '    float sweep = mix(-0.25, 1.25, uReveal);',
+    '    float band = exp(-pow((diag - sweep) / 0.12, 2.0));',
+    '    col += vec3(0.32, 0.38, 0.34) * band * (1.0 - uReveal * 0.5);',
+    '  }',
+    '  gl_FragColor = vec4(clamp(col, 0.0, 1.0), tex.a);',
+    '}'
+  ].join('\\n');
+
+  var modelMetrics = { modelW: 2.0, clampedH: 2.4, depth: 0.35, baseHeightCm: 18 };
+  var rotY = -0.35;
   var rotX = 0.06;
+  var velY = 0;
+  var velX = 0;
   var dragging = false;
   var lastX = 0, lastY = 0;
 
-  function notifyParent(type, extra) {
+  var currentUnfold = state.unfoldProgress || 0;
+  var targetUnfold = state.unfoldProgress || 0;
+  var currentScale = 1.0;
+  var targetScale = 1.0;
+  var introStart = 0;
+  var rafId = null;
+
+  function notifyParent(type) {
     if (window.ReactNativeWebView) {
-      window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ type: type }, extra || {})));
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: type }));
     }
   }
 
@@ -121,6 +199,8 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
   el.addEventListener('touchstart', function(e) {
     if (e.touches[0]) {
       dragging = true;
+      velY = 0;
+      velX = 0;
       lastX = e.touches[0].clientX;
       lastY = e.touches[0].clientY;
       notifyParent('dragStart');
@@ -130,8 +210,12 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
     if (!dragging || !e.touches[0]) return;
     var cx = e.touches[0].clientX;
     var cy = e.touches[0].clientY;
-    rotY += (cx - lastX) * 0.014;
-    rotX = Math.max(-0.75, Math.min(0.75, rotX + (cy - lastY) * 0.009));
+    var dy = (cx - lastX) * 0.014;
+    var dx = (cy - lastY) * 0.009;
+    rotY += dy;
+    rotX = Math.max(-0.75, Math.min(0.75, rotX + dx));
+    velY = dy;
+    velX = dx;
     lastX = cx;
     lastY = cy;
   }, { passive: true });
@@ -147,6 +231,9 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
       if (ch.geometry) ch.geometry.dispose();
       if (ch.material) {
         if (ch.material.map) ch.material.map.dispose();
+        if (ch.material.uniforms && ch.material.uniforms.uMap && ch.material.uniforms.uMap.value) {
+          ch.material.uniforms.uMap.value.dispose();
+        }
         ch.material.dispose();
       }
     }
@@ -156,6 +243,7 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
     backPlane = null;
     standMesh = null;
     flatStripMesh = null;
+    shaderUniforms = [];
   }
 
   function makeSharpTexture(src, mirror, cb) {
@@ -180,7 +268,6 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
       ctx.drawImage(img, 0, 0, cw, ch);
 
       var tex = new THREE.CanvasTexture(c);
-      tex.encoding = THREE.sRGBEncoding;
       tex.generateMipmaps = false;
       tex.minFilter = THREE.LinearFilter;
       tex.magFilter = THREE.LinearFilter;
@@ -192,24 +279,39 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
     img.src = src;
   }
 
-  function applyUnfold(pct) {
-    state.unfoldProgress = pct;
-    var t = Math.max(0, Math.min(1, pct / 100));
+  function createCardstockMat(tex) {
+    var uniforms = {
+      uMap: { value: tex },
+      uReveal: { value: 0.0 }
+    };
+    shaderUniforms.push(uniforms);
+    return new THREE.ShaderMaterial({
+      uniforms: uniforms,
+      vertexShader: VERT_SHADER,
+      fragmentShader: FRAG_SHADER,
+      transparent: true,
+      side: THREE.DoubleSide
+    });
+  }
+
+  function applyTransformState() {
+    var t = Math.max(0, Math.min(1, currentUnfold / 100));
     var faceZ = modelMetrics.depth / 2 + 0.008;
+
+    root.scale.setScalar(currentScale);
 
     if (extrudeBody) {
       var foldedVis = t < 0.18;
       extrudeBody.visible = foldedVis;
       if (edgeLines) edgeLines.visible = foldedVis;
-      var s = Math.max(0.01, 1 - t * 4);
-      extrudeBody.scale.set(1, 1, s);
-      if (edgeLines) edgeLines.scale.set(1, 1, s);
+      var sz = Math.max(0.01, 1 - t * 4);
+      extrudeBody.scale.set(1, 1, sz);
+      if (edgeLines) edgeLines.scale.set(1, 1, sz);
     }
 
     if (frontPlane) {
       var spread = Math.max(0.95, modelMetrics.modelW * 0.58);
       frontPlane.position.set(-spread * t, 0.28 * t, faceZ * (1 - t));
-      frontPlane.rotation.y = (1 - t) * 0.0;
     }
 
     if (backPlane) {
@@ -231,7 +333,13 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
       standMesh.rotation.x = t * (Math.PI / 2);
     }
 
-    disc.visible = t < 0.15;
+    var matVisible = t < 0.15;
+    disc.visible = matVisible;
+    shadowMesh.visible = matVisible;
+    if (matVisible) {
+      var shScale = Math.max(0.65, (modelMetrics.modelW * currentScale) / 2.0);
+      shadowMesh.scale.set(shScale, 1.0, 1.0);
+    }
   }
 
   function rebuildMesh(cfg) {
@@ -240,11 +348,14 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
       makeSharpTexture(cfg.imageUri, true, function(backTex) {
         disposeGroup(root);
 
-        var modelH = 2.55 * ((cfg.heightCm || 18) / 18);
+        var baseH = cfg.heightCm || 18;
+        var modelH = 2.55 * (baseH / 18);
         var clampedH = Math.max(1.5, Math.min(2.95, modelH));
         var modelW = clampedH * (aspect || 1);
-        var depth = Math.max(0.24, ((cfg.depthCm || 2.5) / Math.max(10, cfg.heightCm || 18)) * clampedH * 1.45);
-        modelMetrics = { modelW: modelW, clampedH: clampedH, depth: depth };
+        var depth = Math.max(0.24, ((cfg.depthCm || 2.5) / Math.max(10, baseH)) * clampedH * 1.45);
+        modelMetrics = { modelW: modelW, clampedH: clampedH, depth: depth, baseHeightCm: baseH };
+        currentScale = 0.92;
+        targetScale = 1.0;
 
         var pts = (cfg.contour && cfg.contour.length >= 3)
           ? cfg.contour
@@ -282,7 +393,7 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
         if (frontTex) {
           frontPlane = new THREE.Mesh(
             new THREE.PlaneGeometry(modelW, clampedH),
-            new THREE.MeshBasicMaterial({ map: frontTex, transparent: true, alphaTest: 0.15, side: THREE.DoubleSide })
+            createCardstockMat(frontTex)
           );
           frontPlane.position.z = faceZ;
           root.add(frontPlane);
@@ -290,7 +401,7 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
         if (backTex) {
           backPlane = new THREE.Mesh(
             new THREE.PlaneGeometry(modelW, clampedH),
-            new THREE.MeshBasicMaterial({ map: backTex, transparent: true, alphaTest: 0.15, side: THREE.DoubleSide })
+            createCardstockMat(backTex)
           );
           backPlane.position.z = -faceZ;
           backPlane.rotation.y = Math.PI;
@@ -312,7 +423,8 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
         standMesh.visible = !!cfg.includeStand;
         root.add(standMesh);
 
-        applyUnfold(cfg.unfoldProgress || 0);
+        introStart = performance.now();
+        applyTransformState();
       });
     });
   }
@@ -323,18 +435,19 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
   window.updateStudio3D = function(nextCfg) {
     var needsRebuild =
       nextCfg.imageUri !== lastUri ||
-      nextCfg.heightCm !== state.heightCm ||
       nextCfg.edgeColorHex !== state.edgeColorHex ||
       (nextCfg.contour ? nextCfg.contour.length : 0) !== lastContourLen;
 
     state.includeStand = !!nextCfg.includeStand;
     state.spin = !!nextCfg.spin;
+    targetUnfold = nextCfg.unfoldProgress || 0;
+
     if (needsRebuild) {
       lastUri = nextCfg.imageUri;
       lastContourLen = nextCfg.contour ? nextCfg.contour.length : 0;
       rebuildMesh(nextCfg);
     } else {
-      applyUnfold(nextCfg.unfoldProgress || 0);
+      targetScale = Math.max(0.7, Math.min(1.25, (nextCfg.heightCm || 18) / Math.max(10, modelMetrics.baseHeightCm)));
     }
   };
 
@@ -344,35 +457,79 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
   window.resetStudioCam = function() {
     rotY = 0.25;
     rotX = 0.06;
+    velY = 0;
+    velX = 0;
+    targetUnfold = 0;
   };
 
   window.addEventListener('resize', function() {
     var nw = window.innerWidth || 340;
-    var nh = window.innerHeight || 275;
+    var nh = window.innerHeight || 280;
     camera.aspect = nw / nh;
     camera.updateProjectionMatrix();
     renderer.setSize(nw, nh);
   });
 
-  lastUri = state.imageUri;
-  lastContourLen = state.contour ? state.contour.length : 0;
-  rebuildMesh(state);
+  function animate(now) {
+    if (document.hidden) {
+      rafId = null;
+      return;
+    }
+    rafId = requestAnimationFrame(animate);
 
-  function animate() {
-    requestAnimationFrame(animate);
-    var unfoldT = (state.unfoldProgress || 0) / 100;
+    // 850ms cubic-ease-out intro swoop + uReveal shimmer
+    var elapsed = introStart ? (now - introStart) : 9999;
+    var introT = Math.min(1, Math.max(0, elapsed / 850));
+    var easeOut = 1 - Math.pow(1 - introT, 3);
+    camera.position.z = 7.6 - 1.4 * easeOut;
+    camera.position.y = 0.45 - 0.27 * easeOut;
+
+    for (var u = 0; u < shaderUniforms.length; u++) {
+      shaderUniforms[u].uReveal.value = easeOut;
+    }
+
+    // Damped unfold & size transitions
+    currentUnfold += (targetUnfold - currentUnfold) * 0.16;
+    currentScale += (targetScale - currentScale) * 0.18;
+    applyTransformState();
+
+    var unfoldT = currentUnfold / 100;
     if (unfoldT <= 0.05) {
-      if (state.spin && !dragging) rotY += 0.008;
+      if (!dragging) {
+        rotY += velY;
+        rotX = Math.max(-0.75, Math.min(0.75, rotX + velX));
+        velY *= 0.93;
+        velX *= 0.88;
+        if (state.spin && Math.abs(velY) < 0.004) {
+          rotY += 0.007;
+        }
+      }
       root.rotation.y = rotY;
       root.rotation.x = rotX;
     } else {
-      // Smoothly face viewer squarely as pieces flatten
       root.rotation.y = rotY * (1 - Math.min(1, unfoldT * 1.5));
       root.rotation.x = rotX * (1 - Math.min(1, unfoldT * 1.5));
     }
+
     renderer.render(scene, camera);
   }
-  animate();
+
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden && !rafId) {
+      rafId = requestAnimationFrame(animate);
+    }
+  });
+  window.addEventListener('pagehide', function() {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  });
+
+  lastUri = state.imageUri;
+  lastContourLen = state.contour ? state.contour.length : 0;
+  rebuildMesh(state);
+  rafId = requestAnimationFrame(animate);
 })();
 </script>
 </body>
