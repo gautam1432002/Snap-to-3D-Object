@@ -7,7 +7,7 @@ import { Colors } from '../constants/theme';
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={Colors.bg} />
+      <StatusBar style="light" />
       <Stack
         screenOptions={{
           headerShown: false,

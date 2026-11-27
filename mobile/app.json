@@ -7,11 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "foldly",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
-    "splash": {
-      "backgroundColor": "#0A0B10",
-      "resizeMode": "contain"
-    },
     "ios": {
       "supportsTablet": true
     },

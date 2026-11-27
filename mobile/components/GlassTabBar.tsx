@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { BottomTabBarProps } from 'expo-router/tabs';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Sparkles, Box, Award, BookOpen } from 'lucide-react-native';
@@ -35,7 +35,7 @@ const TABS: TabItemConfig[] = [
   },
 ];
 
-export function GlassTabBar({ state, navigation }: BottomTabBarProps) {
+export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   return (
     <View style={styles.floatingContainer} pointerEvents="box-none">
       {/* Outer Glow & Shadow Container */}
@@ -60,15 +60,18 @@ export function GlassTabBar({ state, navigation }: BottomTabBarProps) {
             const inactiveColor = Colors.tabInactive;
             const iconColor = isFocused ? activeColor : inactiveColor;
 
+            const route = state.routes[index];
+
             const onPress = () => {
-              const event = navigation.emit({
+              if (!route) return;
+              const event = emitter.emit({
                 type: 'tabPress',
-                target: state.routes[index].key,
+                target: route.key,
                 canPreventDefault: true,
               });
 
               if (!isFocused && !event.defaultPrevented) {
-                navigation.navigate(tab.name);
+                navigateToTab(route.key);
               }
             };
 

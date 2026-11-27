@@ -188,7 +188,7 @@ async def scan_upload(
     # 1. Validate MIME
     if file.content_type not in ALLOWED_MIMES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
             detail=f"Unsupported format '{file.content_type}'. Must be JPEG, PNG, or WebP.",
         )
 
@@ -196,7 +196,7 @@ async def scan_upload(
     contents = await file.read()
     if len(contents) > settings.MAX_UPLOAD_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=getattr(status, "HTTP_413_CONTENT_TOO_LARGE", 413),
             detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
         )
 
@@ -423,7 +423,11 @@ async def generate_sheet_for_project(
 # ── File Serving (Preview, Trimmed, Polished, Sheet) ───────────────────────────
 
 @router.get("/api/v1/projects/{project_id}/preview", tags=["files"])
-async def get_preview_image(project_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def get_preview_image(
+    project_id: str,
+    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
     proj = await get_project(db, project_id)
     if not proj or not proj.get("preview_path"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Preview not found")
@@ -434,7 +438,11 @@ async def get_preview_image(project_id: str, db: aiosqlite.Connection = Depends(
 
 
 @router.get("/api/v1/projects/{project_id}/trimmed", tags=["files"])
-async def get_trimmed_image(project_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def get_trimmed_image(
+    project_id: str,
+    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
     proj = await get_project(db, project_id)
     if not proj or not proj.get("trimmed_path"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trimmed image not found")
@@ -445,7 +453,11 @@ async def get_trimmed_image(project_id: str, db: aiosqlite.Connection = Depends(
 
 
 @router.get("/api/v1/projects/{project_id}/polished", tags=["files"])
-async def get_polished_image(project_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def get_polished_image(
+    project_id: str,
+    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
     proj = await get_project(db, project_id)
     if not proj or not proj.get("polished_path"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Polished image not found")
@@ -456,7 +468,11 @@ async def get_polished_image(project_id: str, db: aiosqlite.Connection = Depends
 
 
 @router.get("/api/v1/projects/{project_id}/sheet", tags=["files"])
-async def get_sheet_image(project_id: str, db: aiosqlite.Connection = Depends(get_db)):
+async def get_sheet_image(
+    project_id: str,
+    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
     proj = await get_project(db, project_id)
     if not proj or not proj.get("sheet_path"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sheet image not found")

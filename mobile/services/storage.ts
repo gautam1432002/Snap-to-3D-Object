@@ -6,6 +6,10 @@ export interface CreationItem {
   name: string;
   category: string;
   thumbUrl?: string;
+  previewUrl?: string | null;
+  trimmedUrl?: string | null;
+  polishedUrl?: string | null;
+  sheetUrl?: string | null;
   status: 'Ready' | 'Building' | 'Built';
   buildStep: number;
   totalSteps: number;
@@ -19,6 +23,13 @@ export interface CreationItem {
     solidity: number;
     sharpness: number;
     cropEdgeQuality: number;
+    pixelCoverage?: number;
+  };
+  contour?: {
+    points: [number, number][];
+    perimeterMm: number;
+    edgeColorHex: string;
+    smoothness: string;
   };
 }
 
