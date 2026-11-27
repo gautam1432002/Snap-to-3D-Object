@@ -11,16 +11,12 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
-# ── Quality Metrics ───────────────────────────────────────────────────────────
-
 class QualityMetrics(BaseModel):
     solidity: float = Field(..., ge=0.0, le=1.0, description="Convex-hull solidity")
     sharpness: float = Field(..., ge=0.0, description="Laplacian variance (focus measure)")
     crop_edge_quality: float = Field(..., ge=0.0, le=1.0, description="Fraction of edge pixels that are fully transparent")
     pixel_coverage: float = Field(..., ge=0.0, le=1.0, description="Fraction of bounding-box pixels that are opaque")
 
-
-# ── Contour ───────────────────────────────────────────────────────────────────
 
 class ContourPoint(BaseModel):
     x: float = Field(..., ge=0.0, le=1.0)
@@ -34,20 +30,18 @@ class ContourResult(BaseModel):
     smoothness: str
 
 
-# ── Gemini metadata ───────────────────────────────────────────────────────────
-
 class GeminiMetaResponse(BaseModel):
     object_name: str = ""
     category: str = ""
     suggested_name: str = ""
-    complexity: str = "Medium"      # Easy | Medium | Hard
+    complexity: str = "Medium"
     dominant_colors: list[str] = []
     paper_size: str = "A4"
     estimated_height_cm: float = 18.0
     is_safe: bool = True
+    ai_source: str = "fallback"
+    ai_warning: Optional[str] = None
 
-
-# ── Scan / Upload ─────────────────────────────────────────────────────────────
 
 class ScanResponse(BaseModel):
     project_id: str
@@ -55,20 +49,16 @@ class ScanResponse(BaseModel):
     status: str = "queued"
 
 
-# ── Job status ────────────────────────────────────────────────────────────────
-
 class JobStatusResponse(BaseModel):
     job_id: str
     project_id: str
     stage: str
-    status: str         # queued | running | done | failed
+    status: str
     progress: int = Field(..., ge=0, le=100)
     error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
-
-# ── Project ───────────────────────────────────────────────────────────────────
 
 class ProjectResponse(BaseModel):
     project_id: str
@@ -85,12 +75,38 @@ class ProjectResponse(BaseModel):
     dominant_colors: list[str]
     quality_metrics: Optional[QualityMetrics] = None
     contour: Optional[ContourResult] = None
+    engine_used: Optional[str] = None
+    ai_source: Optional[str] = None
+    ai_warning: Optional[str] = None
     preview_url: Optional[str] = None
     trimmed_url: Optional[str] = None
     polished_url: Optional[str] = None
     sheet_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class ProjectAssetsResponse(BaseModel):
+    project_id: str
+    status: str
+    object_name: str
+    suggested_name: str
+    category: str
+    complexity: str
+    paper_size: str
+    estimated_height_cm: float
+    dominant_colors: list[str]
+    quality_metrics: Optional[QualityMetrics] = None
+    contour: Optional[ContourResult] = None
+    perimeter_mm: float = 0.0
+    edge_color: str = "#2EC4B6"
+    engine_used: Optional[str] = None
+    ai_source: Optional[str] = None
+    ai_warning: Optional[str] = None
+    preview_base64: Optional[str] = None
+    trimmed_base64: Optional[str] = None
+    polished_base64: Optional[str] = None
+    sheet_base64: Optional[str] = None
 
 
 class ProjectListResponse(BaseModel):
@@ -100,15 +116,11 @@ class ProjectListResponse(BaseModel):
     offset: int
 
 
-# ── Mask update ───────────────────────────────────────────────────────────────
-
 class MaskUpdateResponse(BaseModel):
     project_id: str
     status: str = "reprocessed"
     contour: Optional[ContourResult] = None
 
-
-# ── Error ─────────────────────────────────────────────────────────────────────
 
 class ErrorResponse(BaseModel):
     detail: str

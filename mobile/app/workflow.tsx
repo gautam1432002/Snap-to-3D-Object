@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Alert,
-  PanResponder,
   BackHandler,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -16,24 +15,36 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
-import { X } from 'lucide-react-native';
+import { X, ChevronLeft } from 'lucide-react-native';
 
-import { Colors, Spacing } from '../constants/theme';
+import { Colors } from '../constants/theme';
+import { CuttingMatBackground } from '../components/CuttingMatBackground';
+import { ServerUrlModal } from '../components/ServerUrlModal';
 import {
-  DEMO_SAMPLES,
   uploadScan,
   pollJobUntilDone,
+  getProjectAssets,
   triggerPolish,
+  triggerCutoutSheet,
+  normalizeContourPoints,
   fetchImageAsBase64,
-  resolveApiUrl,
 } from '../services/api';
 import {
   saveCreation,
   updateCreation,
+  getSavedCreations,
   checkAndUnlockBadges,
-  CreationItem,
+  incrementScanned,
   getPaperPreference,
+  setPaperPreference,
+  CreationItem,
 } from '../services/storage';
+import {
+  ContourPoint,
+  SAMPLE_TEMPLATES,
+  svgMarkupToDataUri,
+} from '../utils/sampleTemplates';
+import { generatePrintHtml } from '../utils/pdfTemplate';
 
 import { Stage1Capture } from '../components/workflow/Stage1Capture';
 import { Stage2Lift } from '../components/workflow/Stage2Lift';
@@ -41,265 +52,447 @@ import { Stage3Preview3D } from '../components/workflow/Stage3Preview3D';
 import { Stage4Unfold } from '../components/workflow/Stage4Unfold';
 import { Stage5Print } from '../components/workflow/Stage5Print';
 import { Stage6Build } from '../components/workflow/Stage6Build';
-import { generatePrintHtml } from '../utils/pdfTemplate';
 
-const STAGE_NAMES = ['Capture', 'Subject Lift', '3D Model', 'Unfold', 'Print PDF', 'Assembly'];
+const STAGE_TITLES = [
+  '',
+  '1. Capture Object',
+  '2. Neural Subject Lift',
+  '3. Crisp 3D Model',
+  '4. Unfold 3D → 2D',
+  '5. Printable Layout',
+  '6. 7-Step Build Guide',
+];
 
 export default function WorkflowScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ sampleId?: string; creationId?: string; autoPick?: string }>();
+  const params = useLocalSearchParams<{
+    sampleId?: string;
+    creationId?: string;
+    autoPick?: string;
+  }>();
 
   const [currentStage, setCurrentStage] = useState<number>(1);
+  const [scrollLocked, setScrollLocked] = useState<boolean>(false);
+  const [serverModalOpen, setServerModalOpen] = useState<boolean>(false);
+
+  // Active Craft Metadata
   const [projectId, setProjectId] = useState<string>(`proj_${Date.now()}`);
-  const [modelName, setModelName] = useState<string>('Custom Craft');
-  const [category, setCategory] = useState<string>('Custom');
-  const [edgeColorHex, setEdgeColorHex] = useState<string>('#F4C430');
+  const [isRealPhoto, setIsRealPhoto] = useState<boolean>(false);
+  const [selectedSampleId, setSelectedSampleId] = useState<string | null>('crossing');
+  const [modelName, setModelName] = useState<string>(SAMPLE_TEMPLATES.crossing.name);
+  const [category, setCategory] = useState<string>(SAMPLE_TEMPLATES.crossing.category);
+  const [estMinutes, setEstMinutes] = useState<number>(SAMPLE_TEMPLATES.crossing.estMinutes);
+  const [buildTip, setBuildTip] = useState<string>(SAMPLE_TEMPLATES.crossing.buildTip);
+  const [edgeColorHex, setEdgeColorHex] = useState<string>(SAMPLE_TEMPLATES.crossing.edgeColorHex);
 
-  // Stage 1 (Capture)
+  // Stage 1 & Stage 2 State
   const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [cutoutBase64, setCutoutBase64] = useState<string | null>(null);
+  const [dieCutBorder, setDieCutBorder] = useState<boolean>(false);
+  const [engineUsed, setEngineUsed] = useState<string>('Studio Sample');
+  const [aiSource, setAiSource] = useState<string | null>(null);
+  const [aiWarning, setAiWarning] = useState<string | null>(null);
+  const [solidity, setSolidity] = useState<number>(94);
+  const [sharpness, setSharpness] = useState<number>(96);
+  const [cropStatus, setCropStatus] = useState<string>('Clean ✓');
   const [isProcessingUpload, setIsProcessingUpload] = useState<boolean>(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadProgressDesc, setUploadProgressDesc] = useState<string>('');
-  const [selectedSampleId, setSelectedSampleId] = useState<string | null>(null);
-
-  // Stage 2 (Lift & Quality)
-  const [cutoutUri, setCutoutUri] = useState<string | null>(null);
-  const [solidity, setSolidity] = useState<number>(84);
-  const [sharpness, setSharpness] = useState<number>(92);
-  const [cropStatus, setCropStatus] = useState<string>('All edges clean');
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isPolishing, setIsPolishing] = useState<boolean>(false);
 
-  // Stage 3 (3D Model)
-  const [rotationAngle, setRotationAngle] = useState<number>(25);
+  // Stage 3 & Stage 4 State
+  const [contour, setContour] = useState<ContourPoint[]>(SAMPLE_TEMPLATES.crossing.contour);
+  const [perimeterMm, setPerimeterMm] = useState<number>(520);
   const [moldStyle, setMoldStyle] = useState<'block' | 'standee'>('block');
   const [heightCm, setHeightCm] = useState<number>(18);
   const [depthCm, setDepthCm] = useState<number>(2.5);
-
-  // Stage 4 (Unfold)
+  const [smoothness, setSmoothness] = useState<'Easy' | 'Medium' | 'Hard'>('Medium');
+  const [includeStand, setIncludeStand] = useState<boolean>(true);
   const [unfoldProgress, setUnfoldProgress] = useState<number>(0);
 
-  // Stage 5 (Print)
+  // Stage 5 State
   const [paperSize, setPaperSize] = useState<'A4' | 'Letter'>('A4');
-  const [previewPage, setPreviewPage] = useState<1 | 2>(1);
+  const [aiSheetBase64, setAiSheetBase64] = useState<string | null>(null);
+  const [aiSheetWarning, setAiSheetWarning] = useState<string | null>(null);
+  const [isGeneratingSheet, setIsGeneratingSheet] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [isSharing, setIsSharing] = useState<boolean>(false);
 
-  // Stage 6 (Build & Glue Timer)
-  const [completedSteps, setCompletedSteps] = useState<number[]>([1]);
+  // Stage 6 State
+  const [buildStepIdx, setBuildStepIdx] = useState<number>(0);
   const [glueTimerSec, setGlueTimerSec] = useState<number>(20);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
 
-  // PanResponder for Stage 3 3D Rotation
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderMove: (_, gestureState) => {
-        setRotationAngle((prev) => (prev + gestureState.vx * 4 + 360) % 360);
-      },
-    })
-  ).current;
+  // Active artwork URI for 3D, Unfold, and PDF
+  const activeSample =
+    selectedSampleId && SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
+      ? SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
+      : SAMPLE_TEMPLATES.crossing;
+  const activeArtworkUri =
+    cutoutBase64 || svgMarkupToDataUri(activeSample.svgMarkup);
 
-  // Initial load
+  // Load initial preferences / route params
   useEffect(() => {
     getPaperPreference().then(setPaperSize);
 
-    if (params.sampleId) {
-      const sample = DEMO_SAMPLES.find((s) => s.sampleId === params.sampleId) || DEMO_SAMPLES[0];
-      loadSample(sample);
-    } else if (params.autoPick === 'gallery') {
-      pickFromGallery();
-    }
+    const bootFromParams = async () => {
+      if (params.creationId) {
+        const saved = await getSavedCreations();
+        const found = saved.find((c) => c.id === params.creationId);
+        if (found) {
+          applyCreationItem(found);
+          setCurrentStage(found.status === 'Building' ? 6 : 3);
+          return;
+        }
+      }
+      if (params.sampleId && SAMPLE_TEMPLATES[params.sampleId as keyof typeof SAMPLE_TEMPLATES]) {
+        const sId = params.sampleId as keyof typeof SAMPLE_TEMPLATES;
+        applySampleTemplate(sId);
+        setCurrentStage(2);
+        return;
+      }
+      if (params.autoPick === 'gallery') {
+        pickFromGallery();
+      }
+    };
+    bootFromParams();
   }, []);
 
-  // Safe Android Hardware Back Button
+  // Android hardware back button
   useEffect(() => {
     const onBackPress = () => {
       if (currentStage > 1) {
-        goToStage(currentStage - 1);
+        setCurrentStage((s) => s - 1);
         return true;
       }
       return false;
     };
-
-    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-    return () => subscription.remove();
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
   }, [currentStage]);
 
-  // Glue Timer Interval Lifecycle
+  // Glue Timer Interval
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let timer: ReturnType<typeof setInterval> | null = null;
     if (isTimerRunning && glueTimerSec > 0) {
-      interval = setInterval(() => {
-        setGlueTimerSec((s) => s - 1);
-      }, 1000);
+      timer = setInterval(() => setGlueTimerSec((s) => s - 1), 1000);
     } else if (glueTimerSec === 0 && isTimerRunning) {
       setIsTimerRunning(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Glue Bond Ready! ⏱️', 'The glue tabs have set firmly. Proceed to the next step.');
     }
     return () => {
-      if (interval) clearInterval(interval);
+      if (timer) clearInterval(timer);
     };
   }, [isTimerRunning, glueTimerSec]);
 
-  const loadSample = (sample: CreationItem) => {
-    setSelectedSampleId(sample.sampleId || 'crossing');
-    setModelName(sample.name);
-    setCategory(sample.category);
-    setEdgeColorHex(sample.edgeColorHex || '#F4C430');
-    setHeightCm(sample.heightCm);
-    setDepthCm(sample.depthCm);
-    setMoldStyle(sample.moldStyle);
-    setSolidity(sample.qualityMetrics?.solidity ? Math.round(sample.qualityMetrics.solidity * 100) : 85);
-    setSharpness(sample.qualityMetrics?.sharpness ? Math.round(sample.qualityMetrics.sharpness) : 92);
+  const applySampleTemplate = (sampleKey: keyof typeof SAMPLE_TEMPLATES) => {
+    const tpl = SAMPLE_TEMPLATES[sampleKey];
+    setIsRealPhoto(false);
+    setCapturedUri(null);
+    setUploadError(null);
+    setSelectedSampleId(tpl.id);
+    setProjectId(`sample_${tpl.id}_${Date.now()}`);
+    setModelName(tpl.name);
+    setCategory(tpl.category);
+    setEstMinutes(tpl.estMinutes);
+    setBuildTip(tpl.buildTip);
+    setEdgeColorHex(tpl.edgeColorHex);
+    setHeightCm(tpl.heightCm);
+    setDepthCm(tpl.depthCm);
+    setMoldStyle(tpl.moldStyle);
+    setIncludeStand(tpl.suggestStand);
+    setContour(tpl.contour);
+    setCutoutBase64(svgMarkupToDataUri(tpl.svgMarkup));
+    setEngineUsed('Studio Sample');
+    setAiSource(null);
+    setAiWarning(null);
+    setSolidity(96);
+    setSharpness(98);
+    setCropStatus('Clean ✓');
+  };
+
+  const applyCreationItem = (c: CreationItem) => {
+    setProjectId(c.id);
+    setIsRealPhoto(!c.sampleId);
+    setSelectedSampleId(c.sampleId || null);
+    setModelName(c.name);
+    setCategory(c.category);
+    setEdgeColorHex(c.edgeColorHex || '#2ec4b6');
+    setHeightCm(c.heightCm || 18);
+    setDepthCm(c.depthCm || 2.5);
+    setMoldStyle(c.moldStyle || 'block');
+    setSmoothness(c.smoothness || 'Medium');
+    setIncludeStand(c.includeStand !== false);
+    setBuildStepIdx(c.buildStep || 0);
+    if (c.buildTip) setBuildTip(c.buildTip);
+    if (c.estMinutes) setEstMinutes(c.estMinutes);
+    if (c.engineUsed) setEngineUsed(c.engineUsed);
+    setAiSource(c.aiSource || null);
+    setAiWarning(c.aiWarning || null);
+    if (c.trimmedBase64 || c.trimmedUrl) {
+      setCutoutBase64(c.trimmedBase64 || c.trimmedUrl || null);
+    } else if (c.sampleId && SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]) {
+      setCutoutBase64(svgMarkupToDataUri(SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES].svgMarkup));
+    }
+    if (c.contour?.points?.length) {
+      setContour(normalizeContourPoints(c.contour.points));
+      setPerimeterMm(c.contour.perimeterMm || 520);
+    } else if (c.sampleId && SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]) {
+      setContour(SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES].contour);
+    }
+  };
+
+  // ── Persist helper ───────────────────────────────────────────────────────────
+
+  const persistProgress = async (
+    nextStatus: 'Ready' | 'Building' | 'Built' = 'Ready',
+    overrideStage?: number
+  ) => {
+    const stageVal = overrideStage ?? currentStage;
+    await checkAndUnlockBadges(stageVal, nextStatus);
+    await saveCreation({
+      id: projectId,
+      name: modelName,
+      category,
+      status: nextStatus,
+      buildStep: buildStepIdx,
+      totalSteps: 7,
+      moldStyle,
+      heightCm,
+      depthCm,
+      smoothness,
+      includeStand,
+      sampleId: isRealPhoto ? null : selectedSampleId,
+      updatedAt: Date.now(),
+      edgeColorHex,
+      estMinutes,
+      buildTip,
+      engineUsed,
+      aiSource,
+      aiWarning,
+      trimmedBase64: cutoutBase64?.startsWith('data:image/png') ? cutoutBase64 : undefined,
+      sheetBase64: aiSheetBase64 || undefined,
+      contour: {
+        points: contour,
+        perimeterMm,
+        edgeColorHex,
+        smoothness,
+      },
+    });
+  };
+
+  const goToStage = async (next: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setCurrentStage(next);
+    await persistProgress(next === 6 ? 'Building' : 'Ready', next);
   };
 
   // ── Stage 1 Actions ──────────────────────────────────────────────────────────
 
   const compressAndSetImage = async (uri: string) => {
     try {
-      const manipResult = await ImageManipulator.manipulateAsync(
+      const manip = await ImageManipulator.manipulateAsync(
         uri,
         [{ resize: { width: 1024 } }],
         { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
       );
-      setCapturedUri(manipResult.uri);
+      setCapturedUri(manip.uri);
+      setIsRealPhoto(true);
       setSelectedSampleId(null);
-      setModelName('Photo Craft');
+      setUploadError(null);
+      setAiSheetBase64(null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch (err) {
-      console.warn('Compression failed:', err);
       setCapturedUri(uri);
+      setIsRealPhoto(true);
+      setSelectedSampleId(null);
     }
   };
 
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission Needed', 'Camera access is required to take photo.');
+      Alert.alert('Permission Needed', 'Camera access is required to scan an object.');
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      quality: 1,
-    });
-    if (!result.canceled && result.assets[0]) {
-      await compressAndSetImage(result.assets[0].uri);
+    const res = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 1 });
+    if (!res.canceled && res.assets[0]) {
+      await compressAndSetImage(res.assets[0].uri);
     }
   };
 
   const pickFromGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission Needed', 'Photo library access is required to choose an image.');
+      Alert.alert('Permission Needed', 'Photo library access is required to upload a photo.');
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      quality: 1,
-    });
-    if (!result.canceled && result.assets[0]) {
-      await compressAndSetImage(result.assets[0].uri);
+    const res = await ImagePicker.launchImageLibraryAsync({ allowsEditing: true, quality: 1 });
+    if (!res.canceled && res.assets[0]) {
+      await compressAndSetImage(res.assets[0].uri);
+    }
+  };
+
+  const runRealPhotoUpload = async () => {
+    if (!capturedUri) return;
+    setIsProcessingUpload(true);
+    setUploadError(null);
+    setUploadProgress(10);
+    setUploadProgressDesc('Uploading photo to FastAPI segmentation pipeline...');
+
+    try {
+      const scanRes = await uploadScan(capturedUri, 'image/jpeg', 'scan.jpg');
+      setProjectId(scanRes.project_id);
+
+      await pollJobUntilDone(scanRes.job_id, (prog, desc) => {
+        setUploadProgress(prog);
+        setUploadProgressDesc(desc);
+      });
+
+      setUploadProgressDesc('Downloading transparent cutout & vector contour...');
+      const assets = await getProjectAssets(scanRes.project_id);
+
+      const finalImg = assets.polished_base64 || assets.trimmed_base64 || assets.preview_base64;
+      if (!finalImg) {
+        throw new Error('Server finished pipeline but did not return a cutout PNG.');
+      }
+
+      setCutoutBase64(finalImg);
+      setModelName(assets.suggested_name || assets.object_name || 'Custom Paper Craft');
+      setCategory(assets.category || 'Everyday');
+      setHeightCm(Math.max(10, Math.min(35, Math.round(assets.estimated_height_cm || 18))));
+      setEdgeColorHex(assets.edge_color || '#2ec4b6');
+      setEngineUsed(assets.engine_used || 'RMBG-ONNX');
+      setAiSource(assets.ai_source || 'fallback');
+      setAiWarning(assets.ai_warning || null);
+
+      if (assets.quality_metrics) {
+        setSolidity(Math.round((assets.quality_metrics.solidity || 0.85) * 100));
+        setSharpness(Math.round(assets.quality_metrics.sharpness || 85));
+        const cropQual = assets.quality_metrics.crop_edge_quality ?? 1;
+        setCropStatus(cropQual >= 0.85 ? 'Clean ✓' : 'Edge Cropped');
+      }
+
+      if (assets.contour?.points?.length) {
+        setContour(normalizeContourPoints(assets.contour.points));
+        setPerimeterMm(assets.perimeter_mm || assets.contour.perimeter_mm || 500);
+      }
+
+      await incrementScanned();
+      await checkAndUnlockBadges(2);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err: any) {
+      // NEVER silently fall back to Demo Mode on a real photo
+      setUploadError(err?.message || 'Failed to upload or process photo on backend.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsProcessingUpload(false);
     }
   };
 
   const confirmCaptureAndLift = async () => {
-    if (!capturedUri && !selectedSampleId) {
-      Alert.alert('Select Object', 'Please take a photo, choose an image, or pick a sample template.');
-      return;
-    }
-
-    goToStage(2);
-
-    if (capturedUri) {
-      setIsProcessingUpload(true);
-      setUploadProgressDesc('Uploading image to neural pipeline...');
-
-      try {
-        const uploadRes = await uploadScan(capturedUri, 'image/jpeg', 'upload.jpg');
-        setProjectId(uploadRes.project_id);
-
-        const completedJob = await pollJobUntilDone(uploadRes.job_id, (_progress, desc) => {
-          setUploadProgressDesc(desc);
-        });
-
-        if (completedJob.status === 'done') {
-          const resolvedCutout = resolveApiUrl(`/api/v1/projects/${uploadRes.project_id}/trimmed`);
-          setCutoutUri(resolvedCutout);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
-      } catch (err) {
-        console.warn('Backend offline or failed, using local demo lift:', err);
-      } finally {
-        setIsProcessingUpload(false);
-      }
+    if (isRealPhoto && capturedUri) {
+      setCurrentStage(2);
+      await runRealPhotoUpload();
+    } else if (selectedSampleId) {
+      applySampleTemplate(selectedSampleId as keyof typeof SAMPLE_TEMPLATES);
+      await incrementScanned();
+      await goToStage(2);
     }
   };
 
-  // ── Stage 2 Actions ──────────────────────────────────────────────────────────
+  // ── Stage 2 Polish ───────────────────────────────────────────────────────────
 
   const handlePolish = async () => {
+    if (!isRealPhoto) return;
     setIsPolishing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const res = await triggerPolish(projectId, ['bottom']);
-      if (res.polished_url) {
-        setCutoutUri(res.polished_url);
+      const res = await triggerPolish(projectId, cropStatus.includes('Clean') ? [] : ['edges']);
+      if (res.polished_base64) {
+        setCutoutBase64(res.polished_base64);
       }
-      setCropStatus('Healed & Outpainted');
-      Alert.alert('✨ AI Outpainted', 'Edges expanded and background halo cleaned with Gemini 3.1 Flash.');
-    } catch {
-      Alert.alert('AI Edge Polish', 'Edge polish simulation complete.');
+      if (res.contour?.points?.length) {
+        setContour(normalizeContourPoints(res.contour.points));
+        setPerimeterMm(res.contour.perimeter_mm || perimeterMm);
+        setEdgeColorHex(res.contour.edge_color_hex || edgeColorHex);
+      }
+      setAiSource(res.ai_source || 'fallback');
+      setAiWarning(res.ai_warning || null);
+      if (res.ai_source === 'gemini') {
+        setCropStatus('Healed ✓');
+        Alert.alert('✨ Gemini Polish Applied', 'Cropped edges healed & cutout colors sharpened!');
+      } else if (res.ai_warning) {
+        Alert.alert('Gemini Polish Notice', res.ai_warning);
+      }
+    } catch (err: any) {
+      Alert.alert('Polish Error', err?.message || 'Failed to run Gemini polish.');
     } finally {
       setIsPolishing(false);
     }
   };
 
-  // ── Stage Navigation ─────────────────────────────────────────────────────────
+  // ── Stage 3 Smoothness Change ────────────────────────────────────────────────
 
-  const goToStage = async (next: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCurrentStage(next);
-    await checkAndUnlockBadges(next);
-
-    await saveCreation({
-      id: projectId,
-      name: modelName,
-      category,
-      status: next === 6 ? 'Building' : 'Ready',
-      buildStep: completedSteps.length,
-      totalSteps: 7,
-      moldStyle,
-      heightCm,
-      depthCm,
-      sampleId: selectedSampleId,
-      updatedAt: Date.now(),
-      edgeColorHex,
-      trimmedUrl: cutoutUri,
-    });
+  const handleChangeSmoothness = async (nextSmooth: 'Easy' | 'Medium' | 'Hard') => {
+    setSmoothness(nextSmooth);
+    if (isRealPhoto && projectId) {
+      try {
+        const assets = await getProjectAssets(projectId, {
+          smoothness: nextSmooth,
+          heightCm,
+        });
+        if (assets.contour?.points?.length) {
+          setContour(normalizeContourPoints(assets.contour.points));
+          setPerimeterMm(assets.perimeter_mm || assets.contour.perimeter_mm || perimeterMm);
+        }
+      } catch {}
+    }
   };
 
-  // ── Stage 5 Print Actions ────────────────────────────────────────────────────
+  // ── Stage 5 Print & AI Sheet ─────────────────────────────────────────────────
 
-  const buildHtmlDocument = async (): Promise<string> => {
-    const base64Artwork = cutoutUri ? await fetchImageAsBase64(cutoutUri) : null;
-    const sampleEmoji =
-      selectedSampleId === 'crossing'
-        ? '🚸'
-        : selectedSampleId === 'sneaker'
-        ? '👟'
-        : selectedSampleId === 'fox'
-        ? '🦊'
-        : '🧋';
+  const handleGenerateAiSheet = async () => {
+    setIsGeneratingSheet(true);
+    setAiSheetWarning(null);
+    try {
+      if (isRealPhoto) {
+        const res = await triggerCutoutSheet(projectId);
+        if (res.sheet_base64) {
+          setAiSheetBase64(res.sheet_base64);
+        } else if (res.sheet_url) {
+          const b64 = await fetchImageAsBase64(res.sheet_url);
+          if (b64) setAiSheetBase64(b64);
+        }
+        setAiSheetWarning(res.ai_warning || null);
+      } else {
+        // Sample template preview sheet
+        setAiSheetWarning('Demo template uses vector Pages 1 & 2; scan a real object with GEMINI_API_KEY configured to generate an AI illustrated sheet.');
+        setAiSheetBase64(null);
+      }
+    } catch (err: any) {
+      setAiSheetWarning(err?.message || 'Failed to generate AI cutout sheet.');
+    } finally {
+      setIsGeneratingSheet(false);
+    }
+  };
 
+  const buildPdfHtml = async (): Promise<string> => {
+    const resolvedArt = cutoutBase64 || (await fetchImageAsBase64(activeArtworkUri)) || activeArtworkUri;
     return generatePrintHtml({
       modelName,
       category,
       paperSize,
       heightCm,
       depthCm,
+      moldStyle,
+      includeStand,
       edgeColorHex,
-      cutoutBase64: base64Artwork,
-      sampleEmoji,
+      perimeterMm,
+      contour,
+      artworkUri: resolvedArt,
+      aiSheetBase64,
     });
   };
 
@@ -307,11 +500,11 @@ export default function WorkflowScreen() {
     setIsPrinting(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const html = await buildHtmlDocument();
+      const html = await buildPdfHtml();
       await Print.printAsync({ html });
       await checkAndUnlockBadges(5);
-    } catch (err) {
-      console.warn('Print failed:', err);
+    } catch (err: any) {
+      Alert.alert('Print Error', err?.message || 'Could not open system print dialog.');
     } finally {
       setIsPrinting(false);
     }
@@ -321,223 +514,289 @@ export default function WorkflowScreen() {
     setIsSharing(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const html = await buildHtmlDocument();
+      const html = await buildPdfHtml();
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri, {
         UTI: '.pdf',
         mimeType: 'application/pdf',
-        dialogTitle: `Share Foldly - ${modelName}.pdf`,
+        dialogTitle: `Foldly - ${modelName} (${paperSize}).pdf`,
       });
       await checkAndUnlockBadges(5);
-    } catch (err) {
-      console.warn('Share failed:', err);
+    } catch (err: any) {
+      Alert.alert('PDF Export Error', err?.message || 'Could not generate PDF file.');
     } finally {
       setIsSharing(false);
     }
   };
 
-  // ── Stage 6 Actions ──────────────────────────────────────────────────────────
-
-  const toggleStep = (stepNum: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setCompletedSteps((prev) =>
-      prev.includes(stepNum) ? prev.filter((s) => s !== stepNum) : [...prev, stepNum]
-    );
-  };
-
-  const startGlueTimer = () => {
-    setGlueTimerSec(20);
-    setIsTimerRunning(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-  };
-
   const handleFinishCraft = async () => {
-    await updateCreation(projectId, { status: 'Built', buildStep: 7 });
-    await checkAndUnlockBadges(6, 'Built');
+    await updateCreation(projectId, { status: 'Built', buildStep: 6 });
+    await persistProgress('Built', 6);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Alert.alert(
-      '🎉 Craft Complete!',
-      `Congratulations! "${modelName}" is now finished and placed in your physical gallery. You unlocked the Master Folder badge!`,
-      [
-        {
-          text: 'View Gallery',
-          onPress: () => router.replace('/creations'),
-        },
-      ]
+      '🎉 Awesome Craft!',
+      `"${modelName}" is finished and saved to My Creations!`,
+      [{ text: 'View Creations', onPress: () => router.replace('/(tabs)/creations') }]
     );
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Top Workflow Stepper Header */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-          <X size={20} color={Colors.ink} />
-        </TouchableOpacity>
+    <CuttingMatBackground showTopRuler={false}>
+      <SafeAreaView style={styles.safeArea}>
+        {/* Workflow Header */}
+        <View style={styles.wfHeader}>
+          <TouchableOpacity
+            onPress={() => (currentStage > 1 ? setCurrentStage((s) => s - 1) : router.back())}
+            style={styles.iconBtn}
+          >
+            <ChevronLeft size={20} color={Colors.inkOnMat} />
+          </TouchableOpacity>
 
-        <View style={styles.stepperCenter}>
-          <Text style={styles.stageTitle}>
-            Stage {currentStage}/6: {STAGE_NAMES[currentStage - 1]}
-          </Text>
-          <View style={styles.stepDotsRow}>
-            {[1, 2, 3, 4, 5, 6].map((st) => (
-              <View
-                key={st}
-                style={[
-                  styles.stepDot,
-                  st === currentStage
-                    ? styles.stepDotActive
-                    : st < currentStage
-                    ? styles.stepDotCompleted
-                    : null,
-                ]}
-              />
-            ))}
+          <View style={styles.headerCenter}>
+            <Text style={styles.wfTitle} numberOfLines={1}>
+              {STAGE_TITLES[currentStage]}
+            </Text>
+            <Text style={styles.wfSub} numberOfLines={1}>
+              Neural Lift → Crisp 3D → Exact-Scale Print
+            </Text>
           </View>
+
+          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+            <X size={18} color={Colors.inkOnMat} />
+          </TouchableOpacity>
         </View>
 
-        <View style={{ width: 38 }} />
-      </View>
+        {/* 6-Dot Stage Stepper */}
+        <View style={styles.stageStepper}>
+          {[1, 2, 3, 4, 5, 6].map((st) => (
+            <View
+              key={st}
+              style={[
+                styles.stageDot,
+                st < currentStage && styles.stageDotDone,
+                st === currentStage && styles.stageDotActive,
+              ]}
+            />
+          ))}
+        </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {currentStage === 1 && (
-          <Stage1Capture
-            capturedUri={capturedUri}
-            selectedSampleId={selectedSampleId}
-            modelName={modelName}
-            category={category}
-            onTakePhoto={takePhoto}
-            onPickGallery={pickFromGallery}
-            onSelectSample={loadSample}
-            onConfirm={confirmCaptureAndLift}
-          />
-        )}
+        <ScrollView
+          scrollEnabled={!scrollLocked}
+          contentContainerStyle={styles.scrollBody}
+          showsVerticalScrollIndicator={false}
+        >
+          {currentStage === 1 && (
+            <Stage1Capture
+              capturedUri={capturedUri}
+              selectedSampleId={selectedSampleId}
+              modelName={modelName}
+              onTakePhoto={takePhoto}
+              onPickGallery={pickFromGallery}
+              onSelectSample={(id) => applySampleTemplate(id)}
+              onRetake={() => {
+                setCapturedUri(null);
+                setIsRealPhoto(false);
+                setSelectedSampleId('crossing');
+              }}
+              onConfirm={confirmCaptureAndLift}
+            />
+          )}
 
-        {currentStage === 2 && (
-          <Stage2Lift
-            cutoutUri={cutoutUri}
-            selectedSampleId={selectedSampleId}
-            solidity={solidity}
-            sharpness={sharpness}
-            cropStatus={cropStatus}
-            isPolishing={isPolishing}
-            isProcessingUpload={isProcessingUpload}
-            uploadProgressDesc={uploadProgressDesc}
-            onPolish={handlePolish}
-            onBack={() => goToStage(1)}
-            onNext={() => goToStage(3)}
-          />
-        )}
+          {currentStage === 2 && (
+            <Stage2Lift
+              originalPhotoUri={capturedUri}
+              cutoutUri={cutoutBase64}
+              sampleId={selectedSampleId}
+              isRealPhoto={isRealPhoto}
+              modelName={modelName}
+              category={category}
+              estMinutes={estMinutes}
+              edgeColorHex={edgeColorHex}
+              engineUsed={engineUsed}
+              aiSource={aiSource}
+              aiWarning={aiWarning}
+              solidity={solidity}
+              sharpness={sharpness}
+              cropStatus={cropStatus}
+              dieCutBorder={dieCutBorder}
+              isProcessingUpload={isProcessingUpload}
+              uploadProgress={uploadProgress}
+              uploadProgressDesc={uploadProgressDesc}
+              isPolishing={isPolishing}
+              uploadError={uploadError}
+              onToggleDieCut={() => setDieCutBorder((v) => !v)}
+              onRename={(name) => setModelName(name)}
+              onPolish={handlePolish}
+              onRetryScan={runRealPhotoUpload}
+              onEditServerUrl={() => setServerModalOpen(true)}
+              onBack={() => setCurrentStage(1)}
+              onNext={() => goToStage(3)}
+              onScrollLock={setScrollLocked}
+            />
+          )}
 
-        {currentStage === 3 && (
-          <Stage3Preview3D
-            rotationAngle={rotationAngle}
-            panResponderHandlers={panResponder.panHandlers}
-            selectedSampleId={selectedSampleId}
-            moldStyle={moldStyle}
-            heightCm={heightCm}
-            depthCm={depthCm}
-            edgeColorHex={edgeColorHex}
-            onChangeMoldStyle={setMoldStyle}
-            onChangeHeight={setHeightCm}
-            onBack={() => goToStage(2)}
-            onNext={() => goToStage(4)}
-          />
-        )}
+          {currentStage === 3 && (
+            <Stage3Preview3D
+              artworkUri={activeArtworkUri}
+              contour={contour}
+              edgeColorHex={edgeColorHex}
+              moldStyle={moldStyle}
+              heightCm={heightCm}
+              depthCm={depthCm}
+              smoothness={smoothness}
+              includeStand={includeStand}
+              onChangeMoldStyle={setMoldStyle}
+              onChangeHeight={setHeightCm}
+              onChangeDepth={setDepthCm}
+              onChangeSmoothness={handleChangeSmoothness}
+              onToggleStand={() => setIncludeStand((v) => !v)}
+              onBack={() => setCurrentStage(2)}
+              onNext={() => goToStage(4)}
+              onScrollLock={setScrollLocked}
+            />
+          )}
 
-        {currentStage === 4 && (
-          <Stage4Unfold
-            unfoldProgress={unfoldProgress}
-            selectedSampleId={selectedSampleId}
-            onChangeProgress={setUnfoldProgress}
-            onBack={() => goToStage(3)}
-            onNext={() => goToStage(5)}
-          />
-        )}
+          {currentStage === 4 && (
+            <Stage4Unfold
+              artworkUri={activeArtworkUri}
+              edgeColorHex={edgeColorHex}
+              includeStand={includeStand}
+              unfoldProgress={unfoldProgress}
+              onChangeProgress={setUnfoldProgress}
+              onBack={() => setCurrentStage(3)}
+              onNext={() => goToStage(5)}
+              onScrollLock={setScrollLocked}
+            />
+          )}
 
-        {currentStage === 5 && (
-          <Stage5Print
-            modelName={modelName}
-            paperSize={paperSize}
-            selectedSampleId={selectedSampleId}
-            previewPage={previewPage}
-            isPrinting={isPrinting}
-            isSharing={isSharing}
-            onChangePage={setPreviewPage}
-            onPrint={handlePrintPdf}
-            onShare={handleSharePdf}
-            onBack={() => goToStage(4)}
-            onNext={() => goToStage(6)}
-          />
-        )}
+          {currentStage === 5 && (
+            <Stage5Print
+              modelName={modelName}
+              category={category}
+              paperSize={paperSize}
+              heightCm={heightCm}
+              depthCm={depthCm}
+              moldStyle={moldStyle}
+              includeStand={includeStand}
+              edgeColorHex={edgeColorHex}
+              perimeterMm={perimeterMm}
+              contour={contour}
+              artworkUri={activeArtworkUri}
+              sampleId={selectedSampleId}
+              isRealPhoto={isRealPhoto}
+              aiSheetBase64={aiSheetBase64}
+              aiSheetWarning={aiSheetWarning}
+              isGeneratingSheet={isGeneratingSheet}
+              isPrinting={isPrinting}
+              isSharing={isSharing}
+              onChangePaperSize={(sz) => {
+                setPaperSize(sz);
+                setPaperPreference(sz);
+              }}
+              onGenerateAiSheet={handleGenerateAiSheet}
+              onPrint={handlePrintPdf}
+              onShare={handleSharePdf}
+              onBack={() => setCurrentStage(4)}
+              onNext={() => {
+                setBuildStepIdx(0);
+                goToStage(6);
+              }}
+            />
+          )}
 
-        {currentStage === 6 && (
-          <Stage6Build
-            completedSteps={completedSteps}
-            glueTimerSec={glueTimerSec}
-            isTimerRunning={isTimerRunning}
-            onToggleStep={toggleStep}
-            onStartTimer={startGlueTimer}
-            onFinish={handleFinishCraft}
-          />
-        )}
+          {currentStage === 6 && (
+            <Stage6Build
+              modelName={modelName}
+              paperSize={paperSize}
+              moldStyle={moldStyle}
+              includeStand={includeStand}
+              buildTip={buildTip}
+              buildStepIdx={buildStepIdx}
+              glueTimerSec={glueTimerSec}
+              isTimerRunning={isTimerRunning}
+              onChangeStep={(idx) => {
+                setBuildStepIdx(idx);
+                setGlueTimerSec(20);
+                setIsTimerRunning(false);
+                updateCreation(projectId, { buildStep: idx, status: 'Building' });
+              }}
+              onStartTimer={() => {
+                setGlueTimerSec(20);
+                setIsTimerRunning(true);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+              }}
+              onFinish={handleFinishCraft}
+            />
+          )}
 
-        <View style={{ height: 40 }} />
-      </ScrollView>
-    </SafeAreaView>
+          <View style={{ height: 32 }} />
+        </ScrollView>
+
+        <ServerUrlModal
+          visible={serverModalOpen}
+          onClose={() => setServerModalOpen(false)}
+        />
+      </SafeAreaView>
+    </CuttingMatBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.bg,
-  },
-  topBar: {
+  safeArea: { flex: 1 },
+  wfHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 15,
+    paddingTop: 14,
+    paddingBottom: 8,
+    gap: 8,
   },
   iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(16, 38, 32, 0.68)',
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerCenter: {
+    flex: 1,
     alignItems: 'center',
   },
-  stepperCenter: {
-    alignItems: 'center',
-  },
-  stageTitle: {
-    fontSize: 13,
+  wfTitle: {
+    fontSize: 17,
     fontWeight: '800',
-    color: Colors.ink,
-    letterSpacing: 0.5,
+    color: Colors.inkOnMat,
   },
-  stepDotsRow: {
+  wfSub: {
+    fontSize: 10.5,
+    color: Colors.sage,
+    marginTop: 1,
+  },
+  stageStepper: {
     flexDirection: 'row',
-    gap: 6,
-    marginTop: 6,
+    gap: 5,
+    paddingHorizontal: 15,
+    paddingBottom: 10,
   },
-  stepDot: {
-    width: 14,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+  stageDot: {
+    flex: 1,
+    height: 5,
+    borderRadius: 99,
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
-  stepDotActive: {
-    backgroundColor: Colors.ruler,
-    width: 20,
-  },
-  stepDotCompleted: {
+  stageDotDone: {
     backgroundColor: Colors.teal,
   },
-  content: {
-    padding: Spacing.lg,
+  stageDotActive: {
+    backgroundColor: Colors.ruler,
+  },
+  scrollBody: {
+    paddingHorizontal: 15,
+    paddingTop: 4,
+    paddingBottom: 28,
   },
 });

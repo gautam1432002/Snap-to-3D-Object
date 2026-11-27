@@ -9,13 +9,13 @@ export default function TabsLayout() {
       tabBar={(props) => <GlassTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: Colors.bg },
+        sceneStyle: { backgroundColor: Colors.mat },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Studio' }} />
+      <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="explore" options={{ title: 'Explore' }} />
       <Tabs.Screen name="creations" options={{ title: 'Creations' }} />
-      <Tabs.Screen name="badges" options={{ title: 'Badges' }} />
-      <Tabs.Screen name="guide" options={{ title: 'Guide' }} />
+      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
     </Tabs>
   );
 }

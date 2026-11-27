@@ -1,258 +1,206 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { ArrowLeft, ArrowRight } from 'lucide-react-native';
-import Svg, { Rect, G, Text as SvgText } from 'react-native-svg';
-import { Colors, Radii, Spacing } from '../../constants/theme';
-import { BentoCard } from '../BentoCard';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+import { Colors } from '../../constants/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const NativeWebView = WebView as unknown as React.ComponentType<any>;
+import { PaperSheet } from '../PaperSheet';
+import { CraftButton } from '../CraftButton';
+import { CraftSlider } from '../CraftSlider';
+import { buildUnfoldHtml } from '../../utils/threeHtml';
 
 interface Stage4UnfoldProps {
-  unfoldProgress: number;
-  selectedSampleId: string | null;
-  onChangeProgress: (progress: number) => void;
+  artworkUri: string;
+  edgeColorHex: string;
+  includeStand: boolean;
+  unfoldProgress: number; // 0..100
+  onChangeProgress: (pct: number) => void;
   onBack: () => void;
   onNext: () => void;
+  onScrollLock?: (locked: boolean) => void;
 }
 
 export function Stage4Unfold({
+  artworkUri,
+  edgeColorHex,
+  includeStand,
   unfoldProgress,
-  selectedSampleId,
   onChangeProgress,
   onBack,
   onNext,
+  onScrollLock,
 }: Stage4UnfoldProps) {
-  const sampleEmoji =
-    selectedSampleId === 'crossing'
-      ? '🚸'
-      : selectedSampleId === 'sneaker'
-      ? '👟'
-      : selectedSampleId === 'fox'
-      ? '🦊'
-      : '🧋';
+  const webViewRef = useRef<any>(null);
+  const [webLoaded, setWebLoaded] = useState(false);
+
+  const initialHtml = useMemo(
+    () =>
+      buildUnfoldHtml({
+        imageUri: artworkUri,
+        edgeColorHex,
+        includeStand,
+        progress: unfoldProgress,
+      }),
+    [artworkUri]
+  );
+
+  useEffect(() => {
+    if (!webLoaded) return;
+    webViewRef.current?.injectJavaScript(
+      `window.updateUnfoldConfig && window.updateUnfoldConfig(${JSON.stringify({
+        edgeColorHex,
+        includeStand,
+        progress: unfoldProgress,
+      })}); true;`
+    );
+  }, [webLoaded, unfoldProgress, edgeColorHex, includeStand]);
+
+  const handleReplay = () => {
+    webViewRef.current?.injectJavaScript(`window.replayUnfold && window.replayUnfold(); true;`);
+  };
 
   return (
     <View style={styles.container}>
-      <BentoCard title="Unfold 3D → 2D Pieces" subtitle="Scrub slider to watch flat pack unfold">
-        <View style={styles.svg3dCanvas}>
-          <Svg width={SCREEN_WIDTH - 64} height={240} viewBox="0 0 300 240">
-            {/* Front Silhouette (moves left as unfold progresses) */}
-            <G transform={`translate(${150 - unfoldProgress * 70}, ${100 - unfoldProgress * 30})`}>
-              <Rect
-                x="-35"
-                y="-35"
-                width="70"
-                height="70"
-                rx="4"
-                fill="#FDFDFB"
-                stroke="#E63946"
-                strokeWidth="1.5"
-              />
-              <SvgText x="0" y="8" fontSize="28" textAnchor="middle">
-                {sampleEmoji}
-              </SvgText>
-            </G>
+      <View style={styles.viewportBox}>
+        <NativeWebView
+          ref={webViewRef}
+          originWhitelist={['*']}
+          source={{ html: initialHtml }}
+          style={styles.webview}
+          javaScriptEnabled
+          domStorageEnabled
+          scrollEnabled={false}
+          onLoadEnd={() => {
+            setWebLoaded(true);
+            webViewRef.current?.injectJavaScript(`window.replayUnfold && window.replayUnfold(); true;`);
+          }}
+          onMessage={(e: WebViewMessageEvent) => {
+            try {
+              const msg = JSON.parse(e.nativeEvent.data);
+              if (msg.type === 'progress' && typeof msg.value === 'number') {
+                onChangeProgress(msg.value);
+              }
+            } catch {}
+          }}
+        />
 
-            {/* Mirrored Back Silhouette (moves right as unfold progresses) */}
-            <G transform={`translate(${150 + unfoldProgress * 70}, ${100 - unfoldProgress * 30})`}>
-              <Rect
-                x="-35"
-                y="-35"
-                width="70"
-                height="70"
-                rx="4"
-                fill="#FDFDFB"
-                stroke="#E63946"
-                strokeWidth="1.5"
-              />
-              <SvgText x="0" y="8" fontSize="28" textAnchor="middle" opacity="0.6">
-                {sampleEmoji}
-              </SvgText>
-            </G>
-
-            {/* Side Gusset Depth Strip (moves down as unfold progresses) */}
-            <G transform={`translate(150, ${145 + unfoldProgress * 35})`}>
-              <Rect
-                x="-110"
-                y="-12"
-                width="220"
-                height="24"
-                rx="2"
-                fill="#FDE7E9"
-                stroke="#3B78F0"
-                strokeWidth="1.5"
-                strokeDasharray="4, 4"
-              />
-              <SvgText x="0" y="4" fontSize="10" fill="#333" textAnchor="middle" fontWeight="bold">
-                EXACT PERIMETER SIDE STRIP
-              </SvgText>
-            </G>
-          </Svg>
+        <View style={styles.statusPill} pointerEvents="none">
+          <Text style={styles.statusPillText}>
+            {unfoldProgress > 92
+              ? '✅ Flattened into Printable Paper Pieces!'
+              : '📐 Unfolding Front, Back & Side Strip...'}
+          </Text>
         </View>
 
-        {/* Scrub Slider */}
-        <View style={styles.scrubSection}>
-          <View style={styles.scrubHeader}>
-            <Text style={styles.scrubLabel}>
-              Unfold Progress: {Math.round(unfoldProgress * 100)}%
-            </Text>
-            <TouchableOpacity
-              onPress={() => onChangeProgress(unfoldProgress >= 1 ? 0 : 1)}
-              style={styles.toggleAnimBtn}
-            >
-              <Text style={styles.toggleAnimText}>
-                {unfoldProgress >= 1 ? 'Fold 3D' : 'Unfold 2D'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Step Pill Selector */}
-          <View style={styles.unfoldPillsRow}>
-            {[0, 0.25, 0.5, 0.75, 1].map((step) => (
-              <TouchableOpacity
-                key={step}
-                onPress={() => onChangeProgress(step)}
-                style={[
-                  styles.unfoldStepPill,
-                  Math.abs(unfoldProgress - step) < 0.1 && styles.unfoldStepPillActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.unfoldStepPillText,
-                    Math.abs(unfoldProgress - step) < 0.1 && styles.unfoldStepPillTextActive,
-                  ]}
-                >
-                  {Math.round(step * 100)}%
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        <View style={styles.glassControls}>
+          <TouchableOpacity onPress={handleReplay} style={styles.glassBtn}>
+            <Text style={styles.glassBtnText}>▶ Replay Unfold</Text>
+          </TouchableOpacity>
         </View>
-      </BentoCard>
+      </View>
 
-      {/* Nav Controls */}
-      <View style={styles.navRow}>
-        <TouchableOpacity onPress={onBack} style={styles.navBackBtn}>
-          <ArrowLeft size={18} color={Colors.muted} />
-          <Text style={styles.navBackText}>Back</Text>
-        </TouchableOpacity>
+      <PaperSheet style={styles.card}>
+        <CraftSlider
+          label="Folded 3D ↔ Flat Paper"
+          valueLabel={`${Math.round(unfoldProgress)}%`}
+          value={Math.round(unfoldProgress)}
+          min={0}
+          max={100}
+          step={1}
+          onChange={onChangeProgress}
+          onSlidingChange={onScrollLock}
+        />
+        <Text style={styles.desc}>
+          Watch how your <Text style={{ fontWeight: '800' }}>Front PNG</Text>,{' '}
+          <Text style={{ fontWeight: '800' }}>Mirrored Back PNG</Text>, exact-perimeter{' '}
+          <Text style={{ fontWeight: '800' }}>Side Depth Strip</Text>, and{' '}
+          <Text style={{ fontWeight: '800' }}>Desk Stand</Text> flatten into printable paper pieces!
+        </Text>
+      </PaperSheet>
 
-        <TouchableOpacity onPress={onNext} style={styles.navNextBtn}>
-          <LinearGradient colors={[Colors.ruler, '#D4A017']} style={styles.navNextGrad}>
-            <Text style={styles.btnPrimaryText}>Generate Print PDF</Text>
-            <ArrowRight size={18} color="#0D1210" />
-          </LinearGradient>
-        </TouchableOpacity>
+      <View style={styles.btnRow}>
+        <CraftButton
+          title="‹ Back"
+          variant="alt"
+          onPress={onBack}
+          style={{ flex: 0.7 }}
+        />
+        <CraftButton
+          title="Preview Printable Layout →"
+          variant="primary"
+          onPress={onNext}
+          style={{ flex: 1.6 }}
+        />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingBottom: Spacing.xl,
-  },
-  svg3dCanvas: {
-    height: 240,
-    backgroundColor: '#0F1614',
-    borderRadius: Radii.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  scrubSection: {
-    gap: Spacing.sm,
-  },
-  scrubHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  scrubLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.ink,
-  },
-  toggleAnimBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radii.sm,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-  },
-  toggleAnimText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.ruler,
-  },
-  unfoldPillsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  unfoldStepPill: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: Radii.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    alignItems: 'center',
-  },
-  unfoldStepPillActive: {
-    borderColor: Colors.ruler,
-    backgroundColor: 'rgba(245, 158, 11, 0.16)',
-  },
-  unfoldStepPillText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.muted,
-  },
-  unfoldStepPillTextActive: {
-    color: Colors.ruler,
-    fontWeight: '800',
-  },
-  navRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginTop: Spacing.lg,
-  },
-  navBackBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 20,
-    height: 52,
-    borderRadius: Radii.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  navBackText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.muted,
-  },
-  navNextBtn: {
-    flex: 1,
-    borderRadius: Radii.md,
+  container: { gap: 11 },
+  viewportBox: {
+    height: 265,
+    borderRadius: 20,
+    backgroundColor: '#0d1f1a',
+    borderWidth: 2,
+    borderColor: 'rgba(157, 184, 175, 0.35)',
     overflow: 'hidden',
+    position: 'relative',
   },
-  navNextGrad: {
-    height: 52,
+  webview: {
+    flex: 1,
+    backgroundColor: '#0d1f1a',
+  },
+  statusPill: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 11,
+    borderRadius: 99,
+    backgroundColor: 'rgba(16, 38, 32, 0.8)',
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  statusPillText: {
+    color: Colors.inkOnMat,
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  glassControls: {
+    position: 'absolute',
+    bottom: 9,
+    alignSelf: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 99,
+    backgroundColor: 'rgba(16, 38, 32, 0.84)',
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  glassBtn: {
+    paddingVertical: 5,
+    paddingHorizontal: 11,
+    borderRadius: 99,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  glassBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  card: {
+    gap: 9,
+  },
+  desc: {
+    fontSize: 11.5,
+    color: '#4b5a55',
+    lineHeight: 17,
+  },
+  btnRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
-  },
-  btnPrimaryText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#0D1210',
   },
 });

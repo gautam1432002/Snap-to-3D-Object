@@ -1,12 +1,7 @@
 """
 app/db/database.py
 ──────────────────
-Raw aiosqlite database layer.  No ORM — just plain SQL for predictability.
-
-Tables
-──────
-projects  – one row per uploaded image / craft project
-jobs      – one row per background pipeline run, FK → projects
+Raw aiosqlite database layer. No ORM — plain SQL with automatic safe schema migration.
 """
 from __future__ import annotations
 
@@ -21,8 +16,6 @@ import aiosqlite
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-# ── Schema ────────────────────────────────────────────────────────────────────
 
 _DDL = """
 PRAGMA journal_mode=WAL;
@@ -48,6 +41,9 @@ CREATE TABLE IF NOT EXISTS projects (
     dominant_colors     TEXT NOT NULL DEFAULT '[]',
     quality_metrics     TEXT,
     contour             TEXT,
+    engine_used         TEXT NOT NULL DEFAULT '',
+    ai_source           TEXT NOT NULL DEFAULT 'fallback',
+    ai_warning          TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );
@@ -67,18 +63,27 @@ CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id);
 CREATE INDEX IF NOT EXISTS idx_projects_device ON projects(device_id);
 """
 
+_MIGRATION_COLUMNS = {
+    "engine_used": "TEXT NOT NULL DEFAULT ''",
+    "ai_source": "TEXT NOT NULL DEFAULT 'fallback'",
+    "ai_warning": "TEXT",
+}
+
 
 async def init_db() -> None:
-    """Create tables if they do not exist yet."""
+    """Create tables if needed and apply safe additive column migrations."""
     settings = get_settings()
     db_path = str(settings.DATABASE_URL).replace("sqlite+aiosqlite:///", "")
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(_DDL)
+        cursor = await db.execute("PRAGMA table_info(projects)")
+        existing_cols = {row[1] for row in await cursor.fetchall()}
+        for col_name, col_def in _MIGRATION_COLUMNS.items():
+            if col_name not in existing_cols:
+                await db.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_def}")
         await db.commit()
     logger.info("Database initialised at %s", db_path)
 
-
-# ── Connection dependency ─────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def _open_db() -> AsyncGenerator[aiosqlite.Connection, None]:
@@ -90,12 +95,9 @@ async def _open_db() -> AsyncGenerator[aiosqlite.Connection, None]:
 
 
 async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
-    """FastAPI dependency — yields an open DB connection."""
     async with _open_db() as db:
         yield db
 
-
-# ── Projects ──────────────────────────────────────────────────────────────────
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -167,8 +169,6 @@ async def delete_project(db: aiosqlite.Connection, project_id: str) -> None:
     await db.commit()
 
 
-# ── Jobs ──────────────────────────────────────────────────────────────────────
-
 async def create_job(db: aiosqlite.Connection, job_id: str, project_id: str) -> None:
     now = _now()
     await db.execute(
@@ -198,8 +198,6 @@ async def update_job(
     await db.execute(f"UPDATE jobs SET {set_clause} WHERE job_id=?", values)
     await db.commit()
 
-
-# ── JSON helpers (for quality_metrics / contour columns) ─────────────────────
 
 def encode_json(obj: Any) -> str:
     return json.dumps(obj)

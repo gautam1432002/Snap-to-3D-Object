@@ -1,320 +1,315 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
+  Image,
+  Modal,
   SafeAreaView,
-  Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Box, Trash2, ExternalLink, RefreshCw } from 'lucide-react-native';
-import { Colors, Radii, Spacing, Typography } from '../../constants/theme';
-import { BentoCard } from '../../components/BentoCard';
-import { getSavedCreations, deleteCreation, CreationItem } from '../../services/storage';
-import { DEMO_SAMPLES } from '../../services/api';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { SvgXml } from 'react-native-svg';
+import { Colors, Spacing, Typography } from '../../constants/theme';
+import { CuttingMatBackground } from '../../components/CuttingMatBackground';
+import { PaperSheet } from '../../components/PaperSheet';
+import { CraftButton } from '../../components/CraftButton';
+import {
+  CreationItem,
+  deleteCreation,
+  getSavedCreations,
+} from '../../services/storage';
+import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
 
 export default function CreationsScreen() {
   const router = useRouter();
   const [creations, setCreations] = useState<CreationItem[]>([]);
-  const [activeFilter, setActiveFilter] = useState<'All' | 'Building' | 'Built'>('All');
+  const [pendingDelete, setPendingDelete] = useState<CreationItem | null>(null);
 
-  useEffect(() => {
-    loadCreations();
+  const loadCreations = useCallback(async () => {
+    const list = await getSavedCreations();
+    setCreations(list);
   }, []);
 
-  const loadCreations = async () => {
-    const list = await getSavedCreations();
-    if (list.length === 0) {
-      // Seed with demo samples for immediate enjoyment
-      setCreations(DEMO_SAMPLES);
-    } else {
-      setCreations(list);
-    }
+  useFocusEffect(
+    useCallback(() => {
+      loadCreations();
+    }, [loadCreations])
+  );
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    await deleteCreation(pendingDelete.id);
+    setCreations((prev) => prev.filter((c) => c.id !== pendingDelete.id));
+    setPendingDelete(null);
   };
 
-  const handleDelete = (id: string, name: string) => {
-    Alert.alert('Delete Model', `Are you sure you want to remove "${name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteCreation(id);
-          setCreations((prev) => prev.filter((c) => c.id !== id));
-        },
+  const openCreation = (item: CreationItem) => {
+    router.push({
+      pathname: '/workflow',
+      params: {
+        creationId: item.id,
+        sampleId: item.sampleId || undefined,
       },
-    ]);
+    });
   };
-
-  const filtered = creations.filter((item) => {
-    if (activeFilter === 'Building') return item.status === 'Building';
-    if (activeFilter === 'Built') return item.status === 'Built';
-    return true;
-  });
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.topHeader}>
-          <View>
-            <Text style={styles.pageHandwritten}>your physical gallery</Text>
-            <Text style={styles.pageTitle}>CREATIONS</Text>
+    <CuttingMatBackground>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.secHead}>
+            <View>
+              <Text style={styles.hand}>your craft bench</Text>
+              <Text style={styles.title}>My Creations</Text>
+            </View>
+            <CraftButton
+              title="+ Scan New"
+              small
+              onPress={() => router.push('/workflow')}
+            />
           </View>
-          <TouchableOpacity onPress={loadCreations} style={styles.refreshBtn}>
-            <RefreshCw size={18} color={Colors.ruler} />
-          </TouchableOpacity>
-        </View>
 
-        {/* Filter Pills */}
-        <View style={styles.filterRow}>
-          {(['All', 'Building', 'Built'] as const).map((filter) => (
-            <TouchableOpacity
-              key={filter}
-              onPress={() => setActiveFilter(filter)}
-              style={[
-                styles.filterPill,
-                activeFilter === filter && styles.activeFilterPill,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.filterText,
-                  activeFilter === filter && styles.activeFilterText,
-                ]}
-              >
-                {filter}
+          {creations.length === 0 ? (
+            <PaperSheet style={styles.emptyCard}>
+              <Text style={{ fontSize: 38, marginBottom: 8 }}>✂️</Text>
+              <Text style={styles.emptyTitle}>Your craft bench is empty</Text>
+              <Text style={styles.emptyDesc}>
+                Scan any real-world object or start a template to see your saved 3D paper crafts here.
               </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+            </PaperSheet>
+          ) : (
+            <View style={{ gap: 11 }}>
+              {creations.map((c) => {
+                const tpl = c.sampleId
+                  ? SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]
+                  : null;
+                const badgeStyle =
+                  c.status === 'Built'
+                    ? styles.pillEasy
+                    : c.status === 'Building'
+                    ? styles.pillMed
+                    : styles.pillReady;
+                const badgeTextStyle =
+                  c.status === 'Built'
+                    ? styles.textEasy
+                    : c.status === 'Building'
+                    ? styles.textMed
+                    : styles.textReady;
 
-        {/* Creations List */}
-        {filtered.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Box size={48} color={Colors.muted} />
-            <Text style={styles.emptyTitle}>No Models in this filter</Text>
-            <Text style={styles.emptySubtitle}>
-              Start a new scan from the Studio to build your 3D papercraft collection.
-            </Text>
+                return (
+                  <PaperSheet key={c.id} style={styles.cardRow}>
+                    <View style={styles.thumbBox}>
+                      {c.trimmedBase64 || c.trimmedUrl ? (
+                        <Image
+                          source={{ uri: c.trimmedBase64 || c.trimmedUrl || '' }}
+                          style={{ width: 52, height: 56 }}
+                          resizeMode="contain"
+                        />
+                      ) : tpl ? (
+                        <SvgXml xml={tpl.svgMarkup} width={52} height={56} />
+                      ) : (
+                        <Text style={{ fontSize: 28 }}>✂️</Text>
+                      )}
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>
+                        {c.name}
+                      </Text>
+                      <View style={styles.metaPills}>
+                        <View style={styles.metaPill}>
+                          <Text style={styles.metaPillText}>{c.heightCm}cm</Text>
+                        </View>
+                        <View style={styles.metaPill}>
+                          <Text style={styles.metaPillText}>
+                            {c.moldStyle === 'standee' ? 'Standee' : 'Crisp 3D'}
+                          </Text>
+                        </View>
+                        <View style={[styles.metaPill, badgeStyle]}>
+                          <Text style={[styles.metaPillText, badgeTextStyle]}>
+                            {c.status}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.btnRow}>
+                        <CraftButton
+                          title="Open"
+                          small
+                          onPress={() => openCreation(c)}
+                          style={{ flex: 1 }}
+                        />
+                        <CraftButton
+                          title="🗑️"
+                          variant="paper"
+                          small
+                          onPress={() => setPendingDelete(c)}
+                          style={{ flex: 0.45 }}
+                        />
+                      </View>
+                    </View>
+                  </PaperSheet>
+                );
+              })}
+            </View>
+          )}
+
+          <View style={{ height: Spacing.bottomBarOffset }} />
+        </ScrollView>
+
+        {/* Delete Confirm Modal */}
+        <Modal
+          visible={!!pendingDelete}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setPendingDelete(null)}
+        >
+          <View style={styles.backdrop}>
+            <PaperSheet style={styles.modalCard}>
+              <Text style={{ fontSize: 34, marginBottom: 6 }}>🗑️</Text>
+              <Text style={styles.modalTitle}>Delete this creation?</Text>
+              <Text style={styles.modalDesc}>
+                This removes "{pendingDelete?.name}" from your craft bench.
+              </Text>
+              <View style={styles.modalBtnRow}>
+                <CraftButton
+                  title="Cancel"
+                  variant="paper"
+                  onPress={() => setPendingDelete(null)}
+                  style={{ flex: 1 }}
+                />
+                <CraftButton
+                  title="Delete"
+                  variant="danger"
+                  onPress={confirmDelete}
+                  style={{ flex: 1 }}
+                />
+              </View>
+            </PaperSheet>
           </View>
-        ) : (
-          filtered.map((item) => {
-            const statusColor =
-              item.status === 'Built'
-                ? Colors.teal
-                : item.status === 'Building'
-                ? Colors.ruler
-                : Colors.fold;
-
-            return (
-              <BentoCard
-                key={item.id}
-                title={item.name}
-                subtitle={`${item.category} • ${item.heightCm} cm • ${item.moldStyle}`}
-                badge={item.status}
-                badgeColor={statusColor}
-                icon={
-                  <Text style={{ fontSize: 20 }}>
-                    {item.sampleId === 'crossing'
-                      ? '🚸'
-                      : item.sampleId === 'sneaker'
-                      ? '👟'
-                      : item.sampleId === 'fox'
-                      ? '🦊'
-                      : '🧋'}
-                  </Text>
-                }
-                rightElement={
-                  <TouchableOpacity
-                    onPress={() => handleDelete(item.id, item.name)}
-                    style={styles.trashBtn}
-                  >
-                    <Trash2 size={16} color={Colors.muted} />
-                  </TouchableOpacity>
-                }
-              >
-                {/* Progress bar if in progress */}
-                <View style={styles.progressSection}>
-                  <View style={styles.progressLabelRow}>
-                    <Text style={styles.progressLabel}>
-                      Step {item.buildStep} of {item.totalSteps}
-                    </Text>
-                    <Text style={styles.progressPercent}>
-                      {Math.round((item.buildStep / item.totalSteps) * 100)}% Complete
-                    </Text>
-                  </View>
-                  <View style={styles.progressBarTrack}>
-                    <View
-                      style={[
-                        styles.progressBarFill,
-                        {
-                          width: `${Math.max(
-                            8,
-                            (item.buildStep / item.totalSteps) * 100
-                          )}%`,
-                          backgroundColor: statusColor,
-                        },
-                      ]}
-                    />
-                  </View>
-                </View>
-
-                {/* Action Buttons */}
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={styles.openBtn}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/workflow',
-                        params: {
-                          sampleId: item.sampleId || undefined,
-                          creationId: item.id,
-                        },
-                      })
-                    }
-                  >
-                    <ExternalLink size={14} color={Colors.ink} />
-                    <Text style={styles.openBtnText}>Open Blueprint</Text>
-                  </TouchableOpacity>
-                </View>
-              </BentoCard>
-            );
-          })
-        )}
-
-        <View style={{ height: Spacing.bottomBarOffset }} />
-      </ScrollView>
-    </SafeAreaView>
+        </Modal>
+      </SafeAreaView>
+    </CuttingMatBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: Colors.bg,
-  },
+  safeArea: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
+    paddingHorizontal: 15,
+    paddingTop: 18,
+    gap: 12,
   },
-  topHeader: {
+  secHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.md,
   },
-  pageHandwritten: {
+  hand: {
     ...Typography.handwritten,
     fontSize: 20,
-    color: Colors.ruler,
   },
-  pageTitle: {
-    ...Typography.hero,
-    fontSize: 22,
-    letterSpacing: 0.5,
+  title: {
+    ...Typography.title1,
   },
-  refreshBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: Radii.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+  emptyCard: {
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  filterPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: Radii.full,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  activeFilterPill: {
-    backgroundColor: 'rgba(244, 196, 48, 0.16)',
-    borderColor: Colors.ruler,
-  },
-  filterText: {
-    ...Typography.caption,
-    fontWeight: '700',
-    color: Colors.muted,
-  },
-  activeFilterText: {
-    color: Colors.ruler,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    gap: Spacing.md,
+    paddingVertical: 26,
+    paddingHorizontal: 16,
   },
   emptyTitle: {
-    ...Typography.title2,
-    marginTop: Spacing.sm,
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.ink,
   },
-  emptySubtitle: {
-    ...Typography.body,
+  emptyDesc: {
+    fontSize: 12.5,
     color: Colors.muted,
     textAlign: 'center',
-    paddingHorizontal: 30,
+    marginTop: 5,
+    lineHeight: 18,
   },
-  trashBtn: {
-    padding: 6,
-  },
-  progressSection: {
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  progressLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  progressLabel: {
-    ...Typography.caption,
-    fontSize: 11,
-    color: Colors.ink,
-    fontWeight: '600',
-  },
-  progressPercent: {
-    ...Typography.caption,
-    fontSize: 11,
-    color: Colors.muted,
-  },
-  progressBarTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: Spacing.sm,
-  },
-  openBtn: {
+  cardRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: Radii.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 11,
   },
-  openBtnText: {
-    fontSize: 12,
+  thumbBox: {
+    width: 64,
+    height: 70,
+    borderRadius: 13,
+    backgroundColor: '#edf5f1',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: '#9db8af',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.ink,
+  },
+  metaPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 5,
+    marginTop: 5,
+  },
+  metaPill: {
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    borderRadius: 99,
+    backgroundColor: '#e8f1ee',
+  },
+  metaPillText: {
+    fontSize: 10,
     fontWeight: '700',
     color: Colors.ink,
+  },
+  pillEasy: { backgroundColor: Colors.easyBg },
+  pillMed: { backgroundColor: Colors.medBg },
+  pillReady: { backgroundColor: Colors.statusReadyBg },
+  textEasy: { color: Colors.easyText },
+  textMed: { color: Colors.medText },
+  textReady: { color: Colors.statusReadyText },
+  btnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(8, 20, 16, 0.76)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 330,
+    alignItems: 'center',
+    padding: 18,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.ink,
+  },
+  modalDesc: {
+    fontSize: 12.5,
+    color: Colors.muted,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 14,
+  },
+  modalBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+    width: '100%',
   },
 });

@@ -1,63 +1,75 @@
 /**
  * Theme & Design Tokens for Foldly Mobile
- * Ported from reference/master_foldly_photo_to_3d_paper_craft_studio.html
+ * Matches :root variables from reference/master_foldly_photo_to_3d_paper_craft_studio.html
  */
 
 export const Colors = {
-  // Backgrounds
-  bg: '#0A0B10',
-  mat: '#1B3A31',
-  matGrid: '#25493E',
+  // Cutting Mat Backdrop
+  bg: '#1b3a31',
+  mat: '#1b3a31',
+  mat2: '#25493e',
+  matGrid: '#25493e',
   matDeep: '#102620',
-  
-  // Surfaces & Cards
-  surface: '#14171F',
-  surfaceCard: 'rgba(20, 26, 23, 0.78)',
-  surfaceBorder: 'rgba(255, 255, 255, 0.08)',
-  
-  // Brand & Craft Accents
-  ink: '#EEF6F2',
-  muted: '#8BA39B',
-  paper: '#FDFDFB',
-  cut: '#E63946',          // Red cut line
-  fold: '#3B78F0',         // Blue fold line
-  ruler: '#F4C430',        // Yellow ruler / CTA accent
-  teal: '#2EC4B6',         // AI lift & success
-  sage: '#9DB8AF',         // Sage green accent
-  
+  matCardBg: 'rgba(16, 38, 32, 0.78)',
+  matCardBorder: 'rgba(157, 184, 175, 0.28)',
+
+  // Tactile Paper & Ink
+  paper: '#fdfdfb',
+  ink: '#17201d',
+  muted: '#53655f',
+  inkOnMat: '#eef6f2',
+  mutedOnMat: '#9db8af',
+
+  // Craft Accents
+  ruler: '#f4c430',
+  cut: '#e63946',
+  fold: '#3b78f0',
+  teal: '#2ec4b6',
+  sage: '#9db8af',
+
   // Liquid Glass
-  glassNav: 'rgba(16, 38, 32, 0.88)',
-  glassBorder: 'rgba(255, 255, 255, 0.22)',
-  glassHighlight: 'rgba(255, 255, 255, 0.35)',
-  glassIndicator: 'rgba(255, 255, 255, 0.16)',
-  glassInnerGlow: 'rgba(255, 255, 255, 0.10)',
+  glassNav: 'rgba(16, 38, 32, 0.82)',
+  glassBorder: 'rgba(255, 255, 255, 0.28)',
+  glassHighlight: 'rgba(255, 255, 255, 0.45)',
+  glassIndicator: 'rgba(255, 255, 255, 0.26)',
 
   // Tab states
-  tabInactive: '#8BA39B',
-  tabActive: '#F4C430',
+  tabInactive: '#9db8af',
+  tabActive: '#f4c430',
 
   // Status badges
-  statusReady: '#2EC4B6',
-  statusBuilding: '#F4C430',
-  statusBuilt: '#3B78F0',
+  statusReadyBg: '#dbeafe',
+  statusReadyText: '#1e40af',
+  statusBuildingBg: '#f4c430',
+  statusBuildingText: '#17201d',
+  statusBuiltBg: '#2ec4b6',
+  statusBuiltText: '#0c2622',
+
+  // Difficulty pills
+  easyBg: '#d4f5ee',
+  easyText: '#0f5c52',
+  medBg: '#fef3c7',
+  medText: '#854d0e',
+  hardBg: '#fee2e2',
+  hardText: '#991b1b',
 };
 
 export const Spacing = {
   xs: 4,
   sm: 8,
   md: 12,
-  lg: 16,
+  lg: 15,
   xl: 20,
   xxl: 24,
-  bottomBarHeight: 76,
-  bottomBarOffset: 92,
+  bottomBarHeight: 74,
+  bottomBarOffset: 102,
 };
 
 export const Radii = {
-  xs: 4,
-  sm: 8,
-  md: 14,
-  lg: 20,
+  xs: 6,
+  sm: 11,
+  md: 15,
+  lg: 18,
   xl: 26,
   full: 9999,
 };
@@ -66,49 +78,44 @@ export const Typography = {
   hero: {
     fontSize: 28,
     fontWeight: '800' as const,
-    lineHeight: 34,
-    color: Colors.ink,
-    letterSpacing: -0.5,
+    lineHeight: 31,
+    color: Colors.inkOnMat,
+    letterSpacing: -0.6,
   },
   title1: {
-    fontSize: 22,
+    fontSize: 23,
     fontWeight: '800' as const,
     lineHeight: 28,
-    color: Colors.ink,
+    color: Colors.inkOnMat,
   },
   title2: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-    lineHeight: 24,
-    color: Colors.ink,
+    fontSize: 17,
+    fontWeight: '800' as const,
+    lineHeight: 22,
+    color: Colors.inkOnMat,
   },
   title3: {
     fontSize: 15,
-    fontWeight: '700' as const,
+    fontWeight: '800' as const,
     lineHeight: 20,
-    color: Colors.ink,
+    color: Colors.inkOnMat,
   },
   body: {
-    fontSize: 14,
-    fontWeight: '400' as const,
-    lineHeight: 20,
-    color: Colors.ink,
+    fontSize: 13.5,
+    fontWeight: '500' as const,
+    lineHeight: 19,
+    color: Colors.inkOnMat,
   },
   caption: {
-    fontSize: 12,
-    fontWeight: '500' as const,
+    fontSize: 11.5,
+    fontWeight: '600' as const,
     lineHeight: 16,
-    color: Colors.muted,
-  },
-  tag: {
-    fontSize: 11,
-    fontWeight: '700' as const,
-    lineHeight: 14,
-    letterSpacing: 0.2,
+    color: Colors.sage,
   },
   handwritten: {
-    fontSize: 18,
-    fontWeight: '600' as const,
+    fontSize: 21,
+    fontWeight: '700' as const,
+    fontStyle: 'italic' as const,
     color: Colors.ruler,
   },
 };

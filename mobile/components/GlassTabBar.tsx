@@ -1,10 +1,18 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
+  Animated,
+  LayoutChangeEvent,
+} from 'react-native';
 import { BottomTabBarProps } from 'expo-router/tabs';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Sparkles, Box, Award, BookOpen } from 'lucide-react-native';
-import { Colors, Radii } from '../constants/theme';
+import { Home, Compass, Layers, User } from 'lucide-react-native';
+import { Colors } from '../constants/theme';
 
 interface TabItemConfig {
   name: string;
@@ -15,52 +23,101 @@ interface TabItemConfig {
 const TABS: TabItemConfig[] = [
   {
     name: 'index',
-    label: 'Studio',
-    icon: (c) => <Sparkles size={20} color={c} strokeWidth={2.2} />,
+    label: 'Home',
+    icon: (c) => <Home size={20} color={c} strokeWidth={2.2} />,
+  },
+  {
+    name: 'explore',
+    label: 'Explore',
+    icon: (c) => <Compass size={20} color={c} strokeWidth={2.2} />,
   },
   {
     name: 'creations',
     label: 'Creations',
-    icon: (c) => <Box size={20} color={c} strokeWidth={2.2} />,
+    icon: (c) => <Layers size={20} color={c} strokeWidth={2.2} />,
   },
   {
-    name: 'badges',
-    label: 'Badges',
-    icon: (c) => <Award size={20} color={c} strokeWidth={2.2} />,
-  },
-  {
-    name: 'guide',
-    label: 'Guide',
-    icon: (c) => <BookOpen size={20} color={c} strokeWidth={2.2} />,
+    name: 'profile',
+    label: 'Profile',
+    icon: (c) => <User size={20} color={c} strokeWidth={2.2} />,
   },
 ];
 
 export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
+  const [rowWidth, setRowWidth] = useState<number>(0);
+  const indicatorX = useRef(new Animated.Value(0)).current;
+
+  const activeRouteName = state.routes[state.index]?.name || 'index';
+  const activeVisualIdx = Math.max(
+    0,
+    TABS.findIndex((t) => t.name === activeRouteName)
+  );
+  const tabWidth = rowWidth > 0 ? rowWidth / TABS.length : 0;
+
+  useEffect(() => {
+    if (tabWidth <= 0) return;
+    Animated.spring(indicatorX, {
+      toValue: activeVisualIdx * tabWidth,
+      tension: 180,
+      friction: 22,
+      useNativeDriver: true,
+    }).start();
+  }, [activeVisualIdx, tabWidth]);
+
+  const handleLayout = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0 && Math.abs(w - rowWidth) > 1) {
+      setRowWidth(w);
+      indicatorX.setValue(activeVisualIdx * (w / TABS.length));
+    }
+  };
+
   return (
     <View style={styles.floatingContainer} pointerEvents="box-none">
-      {/* Outer Glow & Shadow Container */}
       <View style={styles.glassWrapper}>
-        {/* Android / iOS Blur with Translucent Fallback */}
-        <BlurView intensity={Platform.OS === 'ios' ? 45 : 30} tint="dark" style={StyleSheet.absoluteFill}>
+        <BlurView
+          intensity={Platform.OS === 'ios' ? 45 : 32}
+          tint="dark"
+          style={StyleSheet.absoluteFill}
+        >
           <LinearGradient
             colors={[
-              'rgba(16, 38, 32, 0.90)', // Dark cutting mat deep sage
-              'rgba(27, 58, 49, 0.85)',
-              'rgba(16, 38, 32, 0.94)',
+              'rgba(16, 38, 32, 0.84)',
+              'rgba(27, 58, 49, 0.72)',
+              'rgba(16, 38, 32, 0.90)',
             ]}
             style={StyleSheet.absoluteFill}
           />
         </BlurView>
 
-        {/* Tab Items Row */}
-        <View style={styles.tabsRow}>
-          {TABS.map((tab, index) => {
-            const isFocused = state.index === index;
-            const activeColor = Colors.tabActive;
-            const inactiveColor = Colors.tabInactive;
-            const iconColor = isFocused ? activeColor : inactiveColor;
+        <View style={styles.tabsRow} onLayout={handleLayout}>
+          {tabWidth > 0 && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.slidingGlassPill,
+                {
+                  width: tabWidth,
+                  transform: [{ translateX: indicatorX }],
+                },
+              ]}
+            >
+              <LinearGradient
+                colors={[
+                  'rgba(255, 255, 255, 0.34)',
+                  'rgba(157, 184, 175, 0.18)',
+                  'rgba(255, 255, 255, 0.12)',
+                ]}
+                style={StyleSheet.absoluteFill}
+              />
+            </Animated.View>
+          )}
 
-            const route = state.routes[index];
+          {TABS.map((tab) => {
+            const routeIdx = state.routes.findIndex((r) => r.name === tab.name);
+            const route = routeIdx >= 0 ? state.routes[routeIdx] : undefined;
+            const isFocused = routeIdx === state.index;
+            const iconColor = isFocused ? Colors.ruler : Colors.sage;
 
             const onPress = () => {
               if (!route) return;
@@ -69,7 +126,6 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
                 target: route.key,
                 canPreventDefault: true,
               });
-
               if (!isFocused && !event.defaultPrevented) {
                 navigateToTab(route.key);
               }
@@ -79,24 +135,16 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
               <TouchableOpacity
                 key={tab.name}
                 onPress={onPress}
-                activeOpacity={0.7}
-                style={[styles.tabButton, isFocused && styles.activeTabButton]}
+                activeOpacity={0.75}
+                style={styles.tabButton}
               >
-                {/* Active Indicator Glow Pill */}
-                {isFocused && (
-                  <LinearGradient
-                    colors={[
-                      'rgba(255, 255, 255, 0.28)',
-                      'rgba(157, 184, 175, 0.16)',
-                      'rgba(255, 255, 255, 0.08)',
-                    ]}
-                    style={styles.activePillBackground}
-                  />
-                )}
-
                 <View style={styles.iconContainer}>{tab.icon(iconColor)}</View>
-
-                <Text style={[styles.tabLabel, isFocused ? styles.activeTabLabel : styles.inactiveTabLabel]}>
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    isFocused ? styles.activeTabLabel : styles.inactiveTabLabel,
+                  ]}
+                >
                   {tab.label}
                 </Text>
               </TouchableOpacity>
@@ -111,48 +159,49 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
 const styles = StyleSheet.create({
   floatingContainer: {
     position: 'absolute',
-    left: 14,
-    right: 14,
-    bottom: Platform.OS === 'ios' ? 24 : 16,
-    zIndex: 999,
+    bottom: 14,
+    left: 13,
+    right: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   glassWrapper: {
-    borderRadius: Radii.xl,
+    width: '100%',
+    borderRadius: 26,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Colors.glassBorder,
+    backgroundColor: Colors.glassNav,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.38,
-    shadowRadius: 20,
-    elevation: 12,
-    backgroundColor: 'rgba(16, 38, 32, 0.92)', // Translucent fallback
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.44,
+    shadowRadius: 24,
+    elevation: 16,
+    padding: 6,
   },
   tabsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 6,
-    paddingHorizontal: 6,
+    position: 'relative',
+  },
+  slidingGlassPill: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.45)',
   },
   tabButton: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: Radii.lg,
-    position: 'relative',
-  },
-  activeTabButton: {},
-  activePillBackground: {
-    position: 'absolute',
-    top: 2,
-    bottom: 2,
-    left: 4,
-    right: 4,
-    borderRadius: Radii.md,
-    borderWidth: 1,
-    borderColor: Colors.glassHighlight,
+    paddingVertical: 7,
+    borderRadius: 18,
+    zIndex: 2,
   },
   iconContainer: {
     marginBottom: 3,
@@ -162,11 +211,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   activeTabLabel: {
-    color: Colors.ink,
+    color: '#ffffff',
     fontWeight: '800',
   },
   inactiveTabLabel: {
-    color: Colors.tabInactive,
+    color: Colors.sage,
     fontWeight: '600',
   },
 });

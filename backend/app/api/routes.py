@@ -2,12 +2,13 @@
 app/api/routes.py
 ─────────────────
 Core API routes for scanning, background job tracking, project CRUD,
-touch-up mask updates, Gemini polish/sheet generation, and image serving.
+inline base64 assets delivery, touch-up mask updates, Gemini polish/sheet
+generation, and file serving.
 """
 from __future__ import annotations
 
+import base64
 import io
-import json
 import logging
 import shutil
 import uuid
@@ -38,20 +39,35 @@ from app.models.schemas import (
     ContourResult,
     JobStatusResponse,
     MaskUpdateResponse,
+    ProjectAssetsResponse,
     ProjectListResponse,
     ProjectResponse,
     QualityMetrics,
     ScanResponse,
 )
 from app.services.contour import extract_contour
-from app.services.gemini_service import generate_cutout_sheet, get_object_metadata, polish_cutout
-from app.services.segmentation import run_segmentation
+from app.services.gemini_service import (
+    generate_cutout_sheet_with_status,
+    get_object_metadata,
+    polish_cutout_with_status,
+)
+from app.services.segmentation import ensure_transparent_cutout, run_segmentation
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
 ALLOWED_MIMES = {"image/jpeg", "image/png", "image/webp"}
+
+
+def _file_to_data_uri(path_str: Optional[str]) -> Optional[str]:
+    if not path_str:
+        return None
+    p = Path(path_str)
+    if not p.exists():
+        return None
+    raw = p.read_bytes()
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:image/png;base64,{b64}"
 
 
 # ── Pipeline Runner ───────────────────────────────────────────────────────────
@@ -63,26 +79,22 @@ async def _run_scan_pipeline(project_id: str, job_id: str, original_path: Path):
 
     async with aiosqlite.connect(db_path) as db:
         try:
-            # Stage 1: Segmentation
             await update_job(db, job_id, {"stage": "segmentation", "status": "running", "progress": 20})
             await update_project(db, project_id, {"status": "processing", "stage": "segmentation"})
 
             seg_result = await run_segmentation(original_path, project_dir)
 
-            # Stage 2: Contour extraction
             await update_job(db, job_id, {"stage": "contour", "progress": 50})
             await update_project(db, project_id, {"stage": "contour"})
 
             contour_result = extract_contour(seg_result.trimmed_path, smoothness="Medium")
 
-            # Stage 3: Gemini metadata
             await update_job(db, job_id, {"stage": "metadata", "progress": 75})
             await update_project(db, project_id, {"stage": "metadata"})
 
             trimmed_bytes = seg_result.trimmed_path.read_bytes()
             meta = await get_object_metadata(trimmed_bytes, mime="image/png")
 
-            # Finalize project
             quality_dict = {
                 "solidity": seg_result.solidity,
                 "sharpness": seg_result.sharpness,
@@ -92,7 +104,7 @@ async def _run_scan_pipeline(project_id: str, job_id: str, original_path: Path):
             contour_dict = {
                 "points": contour_result.points if contour_result else [],
                 "perimeter_mm": contour_result.perimeter_mm if contour_result else 0.0,
-                "edge_color_hex": contour_result.edge_color_hex if contour_result else "#888888",
+                "edge_color_hex": contour_result.edge_color_hex if contour_result else "#2EC4B6",
                 "smoothness": contour_result.smoothness if contour_result else "Medium",
             }
 
@@ -113,11 +125,14 @@ async def _run_scan_pipeline(project_id: str, job_id: str, original_path: Path):
                     "dominant_colors": encode_json(meta.dominant_colors),
                     "quality_metrics": encode_json(quality_dict),
                     "contour": encode_json(contour_dict),
+                    "engine_used": seg_result.engine_used,
+                    "ai_source": meta.ai_source,
+                    "ai_warning": meta.ai_warning,
                 },
             )
 
             await update_job(db, job_id, {"stage": "done", "status": "done", "progress": 100})
-            logger.info("Scan pipeline complete for project %s", project_id)
+            logger.info("Scan pipeline complete for project %s (%s)", project_id, seg_result.engine_used)
 
         except Exception as exc:
             logger.exception("Pipeline failed for project %s: %s", project_id, exc)
@@ -153,6 +168,9 @@ def _map_project_response(p: dict) -> ProjectResponse:
         dominant_colors=dominant_colors,
         quality_metrics=QualityMetrics(**qm_raw) if qm_raw else None,
         contour=ContourResult(**contour_raw) if contour_raw else None,
+        engine_used=p.get("engine_used") or None,
+        ai_source=p.get("ai_source") or None,
+        ai_warning=p.get("ai_warning"),
         preview_url=preview_url,
         trimmed_url=trimmed_url,
         polished_url=polished_url,
@@ -185,14 +203,12 @@ async def scan_upload(
 ):
     settings = get_settings()
 
-    # 1. Validate MIME
     if file.content_type not in ALLOWED_MIMES:
         raise HTTPException(
             status_code=getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422),
             detail=f"Unsupported format '{file.content_type}'. Must be JPEG, PNG, or WebP.",
         )
 
-    # 2. Read content & validate size
     contents = await file.read()
     if len(contents) > settings.MAX_UPLOAD_BYTES:
         raise HTTPException(
@@ -200,7 +216,6 @@ async def scan_upload(
             detail=f"File exceeds maximum allowed size of {settings.MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
         )
 
-    # 3. Save to disk
     project_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
     project_dir = settings.STORAGE_PATH / project_id
@@ -210,7 +225,6 @@ async def scan_upload(
     original_path = project_dir / f"original{ext}"
     original_path.write_bytes(contents)
 
-    # 4. DB record initialization
     await create_project(
         db,
         {
@@ -223,8 +237,6 @@ async def scan_upload(
         },
     )
     await create_job(db, job_id, project_id)
-
-    # 5. Background task
     background_tasks.add_task(_run_scan_pipeline, project_id, job_id, original_path)
 
     return ScanResponse(project_id=project_id, job_id=job_id, status="queued")
@@ -255,7 +267,7 @@ async def get_job_status(
     )
 
 
-# ── Projects CRUD ─────────────────────────────────────────────────────────────
+# ── Projects CRUD & Inline Base64 Assets ──────────────────────────────────────
 
 @router.get(
     "/api/v1/projects",
@@ -287,6 +299,78 @@ async def get_project_details(
     if not proj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return _map_project_response(proj)
+
+
+@router.get(
+    "/api/v1/projects/{project_id}/assets",
+    response_model=ProjectAssetsResponse,
+    tags=["projects"],
+)
+async def get_project_assets(
+    project_id: str,
+    smoothness: Optional[str] = Query(None),
+    height_cm: Optional[float] = Query(None, ge=5.0, le=60.0),
+    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """
+    Returns inline base64 data URIs alongside contour_json, perimeter_mm,
+    edge_color, quality metrics, and AI status so React Native, Three.js
+    WebViews, and expo-print PDFs never fail on CORS or header issues.
+    """
+    proj = await get_project(db, project_id, device_id=x_device_id)
+    if not proj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    qm_raw = decode_json(proj.get("quality_metrics"))
+    contour_raw = decode_json(proj.get("contour"))
+    dominant_colors = decode_json(proj.get("dominant_colors")) or []
+
+    # Recompute contour on demand if caller requests a different smoothness/height
+    active_img_path = proj.get("polished_path") or proj.get("trimmed_path")
+    if active_img_path and Path(active_img_path).exists() and (smoothness or height_cm):
+        target_smooth = smoothness if smoothness in {"Easy", "Medium", "Hard"} else (
+            contour_raw.get("smoothness", "Medium") if contour_raw else "Medium"
+        )
+        target_height = height_cm or proj.get("estimated_height_cm") or 18.0
+        recomputed = extract_contour(Path(active_img_path), smoothness=target_smooth, height_cm=target_height)
+        if recomputed:
+            contour_raw = {
+                "points": recomputed.points,
+                "perimeter_mm": recomputed.perimeter_mm,
+                "edge_color_hex": recomputed.edge_color_hex,
+                "smoothness": recomputed.smoothness,
+            }
+
+    contour_model = ContourResult(**contour_raw) if contour_raw else None
+    edge_color = (
+        contour_model.edge_color_hex
+        if contour_model
+        else (dominant_colors[0] if dominant_colors else "#2EC4B6")
+    )
+
+    return ProjectAssetsResponse(
+        project_id=project_id,
+        status=proj["status"],
+        object_name=proj["object_name"],
+        suggested_name=proj["suggested_name"],
+        category=proj["category"],
+        complexity=proj["complexity"],
+        paper_size=proj["paper_size"],
+        estimated_height_cm=proj["estimated_height_cm"],
+        dominant_colors=dominant_colors,
+        quality_metrics=QualityMetrics(**qm_raw) if qm_raw else None,
+        contour=contour_model,
+        perimeter_mm=contour_model.perimeter_mm if contour_model else 0.0,
+        edge_color=edge_color,
+        engine_used=proj.get("engine_used") or None,
+        ai_source=proj.get("ai_source") or None,
+        ai_warning=proj.get("ai_warning"),
+        preview_base64=_file_to_data_uri(proj.get("preview_path")),
+        trimmed_base64=_file_to_data_uri(proj.get("trimmed_path")),
+        polished_base64=_file_to_data_uri(proj.get("polished_path")),
+        sheet_base64=_file_to_data_uri(proj.get("sheet_path")),
+    )
 
 
 @router.delete(
@@ -324,9 +408,6 @@ async def update_mask(
     x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    """
-    Applies user touch-up alpha mask onto trimmed.png and recomputes the contour.
-    """
     proj = await get_project(db, project_id, device_id=x_device_id)
     if not proj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
@@ -339,20 +420,17 @@ async def update_mask(
     mask_img = Image.open(io.BytesIO(mask_bytes)).convert("L")
     trimmed_img = Image.open(trimmed_path).convert("RGBA")
 
-    # Resize mask if dimensions differ
     if mask_img.size != trimmed_img.size:
         mask_img = mask_img.resize(trimmed_img.size, Image.LANCZOS)
 
-    # Apply new mask as alpha channel
     trimmed_img.putalpha(mask_img)
     trimmed_img.save(trimmed_path, "PNG")
 
-    # Recompute contour
     contour_result = extract_contour(trimmed_path, smoothness=proj.get("complexity", "Medium"))
     contour_dict = {
         "points": contour_result.points if contour_result else [],
         "perimeter_mm": contour_result.perimeter_mm if contour_result else 0.0,
-        "edge_color_hex": contour_result.edge_color_hex if contour_result else "#888888",
+        "edge_color_hex": contour_result.edge_color_hex if contour_result else "#2EC4B6",
         "smoothness": contour_result.smoothness if contour_result else "Medium",
     }
     await update_project(db, project_id, {"contour": encode_json(contour_dict)})
@@ -384,13 +462,45 @@ async def polish_project_image(
     if not trimmed_path.exists():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trimmed image missing on disk")
 
-    polished_bytes = await polish_cutout(trimmed_path.read_bytes(), cropped_sides=cropped_sides)
+    polished_bytes, ai_source, ai_warning = await polish_cutout_with_status(
+        trimmed_path.read_bytes(), cropped_sides=cropped_sides
+    )
+    polished_bytes = ensure_transparent_cutout(polished_bytes)
 
     polished_path = trimmed_path.parent / "polished.png"
     polished_path.write_bytes(polished_bytes)
 
-    await update_project(db, project_id, {"polished_path": str(polished_path)})
-    return {"status": "polished", "project_id": project_id, "polished_url": f"/api/v1/projects/{project_id}/polished"}
+    contour_result = extract_contour(polished_path, smoothness=proj.get("complexity", "Medium"))
+    contour_dict = (
+        {
+            "points": contour_result.points,
+            "perimeter_mm": contour_result.perimeter_mm,
+            "edge_color_hex": contour_result.edge_color_hex,
+            "smoothness": contour_result.smoothness,
+        }
+        if contour_result
+        else decode_json(proj.get("contour"))
+    )
+
+    update_fields = {
+        "polished_path": str(polished_path),
+        "ai_source": ai_source,
+        "ai_warning": ai_warning,
+    }
+    if contour_dict:
+        update_fields["contour"] = encode_json(contour_dict)
+
+    await update_project(db, project_id, update_fields)
+    b64 = base64.b64encode(polished_bytes).decode("ascii")
+    return {
+        "status": "polished",
+        "project_id": project_id,
+        "polished_url": f"/api/v1/projects/{project_id}/polished",
+        "polished_base64": f"data:image/png;base64,{b64}",
+        "contour": contour_dict,
+        "ai_source": ai_source,
+        "ai_warning": ai_warning,
+    }
 
 
 @router.post(
@@ -407,7 +517,7 @@ async def generate_sheet_for_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project trimmed image not found")
 
     trimmed_path = Path(proj["trimmed_path"])
-    sheet_bytes = await generate_cutout_sheet(
+    sheet_bytes, ai_source, ai_warning = await generate_cutout_sheet_with_status(
         trimmed_path.read_bytes(),
         name=proj.get("suggested_name") or proj.get("object_name") or "Model",
         paper_size=proj.get("paper_size", "A4"),
@@ -417,7 +527,15 @@ async def generate_sheet_for_project(
     sheet_path.write_bytes(sheet_bytes)
 
     await update_project(db, project_id, {"sheet_path": str(sheet_path)})
-    return {"status": "generated", "project_id": project_id, "sheet_url": f"/api/v1/projects/{project_id}/sheet"}
+    b64 = base64.b64encode(sheet_bytes).decode("ascii")
+    return {
+        "status": "generated",
+        "project_id": project_id,
+        "sheet_url": f"/api/v1/projects/{project_id}/sheet",
+        "sheet_base64": f"data:image/png;base64,{b64}",
+        "ai_source": ai_source,
+        "ai_warning": ai_warning,
+    }
 
 
 # ── File Serving (Preview, Trimmed, Polished, Sheet) ───────────────────────────

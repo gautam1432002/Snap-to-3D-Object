@@ -1,19 +1,25 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ScrollView } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Camera, Image as ImageIcon, ArrowRight } from 'lucide-react-native';
-import { Colors, Radii, Spacing, Typography } from '../../constants/theme';
-import { CreationItem } from '../../services/storage';
-import { DEMO_SAMPLES } from '../../services/api';
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  ScrollView,
+} from 'react-native';
+import { SvgXml } from 'react-native-svg';
+import { Colors } from '../../constants/theme';
+import { CraftButton } from '../CraftButton';
+import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
 
 interface Stage1CaptureProps {
   capturedUri: string | null;
   selectedSampleId: string | null;
   modelName: string;
-  category: string;
   onTakePhoto: () => void;
   onPickGallery: () => void;
-  onSelectSample: (sample: CreationItem) => void;
+  onSelectSample: (sampleId: 'crossing' | 'sneaker' | 'fox' | 'boba') => void;
+  onRetake: () => void;
   onConfirm: () => void;
 }
 
@@ -21,226 +27,325 @@ export function Stage1Capture({
   capturedUri,
   selectedSampleId,
   modelName,
-  category,
   onTakePhoto,
   onPickGallery,
   onSelectSample,
+  onRetake,
   onConfirm,
 }: Stage1CaptureProps) {
+  const [showTips, setShowTips] = useState(false);
+
+  const activeSample =
+    selectedSampleId && SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
+      ? SAMPLE_TEMPLATES[selectedSampleId as keyof typeof SAMPLE_TEMPLATES]
+      : SAMPLE_TEMPLATES.crossing;
+
+  const statusText = capturedUri
+    ? '📸 Photo ready! Confirm below'
+    : `📷 Sample: ${activeSample.name}`;
+
   return (
     <View style={styles.container}>
       {/* Viewfinder Target Area */}
-      <View style={styles.captureFrame}>
+      <View style={styles.viewportBox}>
         <View style={[styles.corner, styles.cornerTL]} />
         <View style={[styles.corner, styles.cornerTR]} />
         <View style={[styles.corner, styles.cornerBL]} />
         <View style={[styles.corner, styles.cornerBR]} />
 
+        <View style={styles.statusPill}>
+          <Text style={styles.statusPillText} numberOfLines={1}>
+            {statusText}
+          </Text>
+        </View>
+
         {capturedUri ? (
-          <Image source={{ uri: capturedUri }} style={styles.previewImage} resizeMode="cover" />
-        ) : selectedSampleId ? (
-          <View style={styles.sampleDisplay}>
-            <Text style={{ fontSize: 72 }}>
-              {selectedSampleId === 'crossing'
-                ? '🚸'
-                : selectedSampleId === 'sneaker'
-                ? '👟'
-                : selectedSampleId === 'fox'
-                ? '🦊'
-                : '🧋'}
-            </Text>
-            <Text style={styles.sampleDisplayName}>{modelName}</Text>
-            <Text style={styles.sampleDisplayCategory}>{category} • 180 gsm</Text>
-          </View>
+          <Image
+            source={{ uri: capturedUri }}
+            style={styles.previewImage}
+            resizeMode="contain"
+          />
         ) : (
-          <View style={styles.emptyCaptureNotice}>
-            <Camera size={44} color={Colors.ruler} strokeWidth={1.5} />
-            <Text style={styles.captureInstructions}>
-              Position subject in good lighting against a plain background
-            </Text>
+          <View style={styles.sampleWrap}>
+            <SvgXml xml={activeSample.svgMarkup} width={175} height={175} />
+            <Text style={styles.sampleLabel}>{modelName || activeSample.name}</Text>
           </View>
         )}
       </View>
 
-      {/* Quick-Pick Samples */}
-      <Text style={styles.sectionLabel}>Or Pick a Ready-Made Template</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.samplePickerRow}
-      >
-        {DEMO_SAMPLES.map((s) => (
-          <TouchableOpacity
-            key={s.id}
-            onPress={() => onSelectSample(s)}
-            style={[
-              styles.sampleChip,
-              selectedSampleId === s.sampleId && styles.sampleChipActive,
-            ]}
-          >
-            <Text style={{ fontSize: 20 }}>
-              {s.sampleId === 'crossing'
-                ? '🚸'
-                : s.sampleId === 'sneaker'
-                ? '👟'
-                : s.sampleId === 'fox'
-                ? '🦊'
-                : '🧋'}
-            </Text>
-            <Text style={styles.sampleChipText}>{s.name.split(' ')[0]}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {capturedUri ? (
+        <View style={styles.confirmBox}>
+          <Text style={styles.confirmHint}>
+            Looks clear! Tap below to run edge-by-edge Subject Lift & Quality Check on your server.
+          </Text>
+          <View style={styles.btnRow}>
+            <CraftButton
+              title="↺ Retake"
+              variant="alt"
+              onPress={onRetake}
+              style={{ flex: 0.8 }}
+            />
+            <CraftButton
+              title="✂️ Confirm & Lift →"
+              variant="primary"
+              onPress={onConfirm}
+              style={{ flex: 1.4 }}
+            />
+          </View>
+        </View>
+      ) : (
+        <View style={styles.liveBox}>
+          {/* Upload / Shutter / Gallery Row */}
+          <View style={styles.shutterRow}>
+            <CraftButton
+              title="🖼️ Gallery"
+              variant="alt"
+              small
+              onPress={onPickGallery}
+              style={{ width: 102 }}
+            />
 
-      {/* Action Buttons */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity onPress={onTakePhoto} style={styles.btnSecondary}>
-          <Camera size={18} color={Colors.ink} />
-          <Text style={styles.btnSecondaryText}>Camera</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              onPress={onTakePhoto}
+              activeOpacity={0.85}
+              style={styles.shutterBtn}
+              accessibilityLabel="Take photo with camera"
+            />
 
-        <TouchableOpacity onPress={onPickGallery} style={styles.btnSecondary}>
-          <ImageIcon size={18} color={Colors.ink} />
-          <Text style={styles.btnSecondaryText}>Gallery</Text>
-        </TouchableOpacity>
-      </View>
+            <CraftButton
+              title="📷 Camera"
+              variant="alt"
+              small
+              onPress={onTakePhoto}
+              style={{ width: 102 }}
+            />
+          </View>
 
-      <TouchableOpacity onPress={onConfirm} style={styles.btnPrimary}>
-        <LinearGradient colors={[Colors.ruler, '#D4A017']} style={styles.btnGradient}>
-          <Text style={styles.btnPrimaryText}>Confirm & Lift Subject</Text>
-          <ArrowRight size={18} color="#0D1210" />
-        </LinearGradient>
-      </TouchableOpacity>
+          {/* Crisp Sample Objects */}
+          <View style={styles.matCard}>
+            <View style={styles.secHead}>
+              <Text style={styles.sampleHeadText}>
+                Or test with a crisp sample object:
+              </Text>
+              <TouchableOpacity
+                onPress={() => setShowTips((v) => !v)}
+                style={styles.infoBtn}
+              >
+                <Text style={styles.infoBtnText}>i</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+            >
+              {(
+                [
+                  { id: 'crossing', label: '🚸 Crossing Sign' },
+                  { id: 'sneaker', label: '👟 Retro Sneaker' },
+                  { id: 'fox', label: '🦊 Fox Sticker' },
+                  { id: 'boba', label: '🧋 Boba Cup' },
+                ] as const
+              ).map((item) => {
+                const active = (selectedSampleId || 'crossing') === item.id;
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    onPress={() => onSelectSample(item.id)}
+                    style={[styles.chip, active && styles.chipActive]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          {showTips && (
+            <View style={styles.infoDrawer}>
+              <Text style={styles.infoText}>
+                📸 <Text style={{ fontWeight: '800' }}>Tips for a super clean Subject Lift:</Text>
+                {'\n'}• Center your object with a little space around all edges.
+                {'\n'}• Plain or contrasting backgrounds give ultra-sharp cutouts.
+                {'\n'}• Even if an edge is cropped, Gemini Polish restores missing pixels!
+              </Text>
+            </View>
+          )}
+
+          <CraftButton
+            title={`✂️ Lift & Craft "${activeSample.shortName}" Sample →`}
+            variant="primary"
+            onPress={onConfirm}
+          />
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingBottom: Spacing.xl,
-  },
-  captureFrame: {
-    height: 280,
-    backgroundColor: '#0F1614',
-    borderRadius: Radii.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    position: 'relative',
+  container: { gap: 11 },
+  viewportBox: {
+    height: 245,
+    borderRadius: 20,
+    backgroundColor: '#0d1f1a',
+    borderWidth: 2,
+    borderColor: 'rgba(157, 184, 175, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  previewImage: {
-    width: '100%',
-    height: '100%',
-  },
-  sampleDisplay: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sampleDisplayName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.ink,
-    marginTop: 12,
-  },
-  sampleDisplayCategory: {
-    fontSize: 13,
-    color: Colors.muted,
-    marginTop: 4,
-  },
-  emptyCaptureNotice: {
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  captureInstructions: {
-    fontSize: 14,
-    color: Colors.muted,
-    textAlign: 'center',
-    marginTop: 12,
-    lineHeight: 20,
+    position: 'relative',
   },
   corner: {
     position: 'absolute',
     width: 24,
     height: 24,
+    borderWidth: 3.5,
     borderColor: Colors.ruler,
+    borderRadius: 4,
+    zIndex: 6,
   },
-  cornerTL: { top: 14, left: 14, borderTopWidth: 2.5, borderLeftWidth: 2.5 },
-  cornerTR: { top: 14, right: 14, borderTopWidth: 2.5, borderRightWidth: 2.5 },
-  cornerBL: { bottom: 14, left: 14, borderBottomWidth: 2.5, borderLeftWidth: 2.5 },
-  cornerBR: { bottom: 14, right: 14, borderBottomWidth: 2.5, borderRightWidth: 2.5 },
-  sectionLabel: {
-    fontSize: 12,
+  cornerTL: { top: 12, left: 12, borderRightWidth: 0, borderBottomWidth: 0 },
+  cornerTR: { top: 12, right: 12, borderLeftWidth: 0, borderBottomWidth: 0 },
+  cornerBL: { bottom: 12, left: 12, borderRightWidth: 0, borderTopWidth: 0 },
+  cornerBR: { bottom: 12, right: 12, borderLeftWidth: 0, borderTopWidth: 0 },
+  statusPill: {
+    position: 'absolute',
+    top: 10,
+    zIndex: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 99,
+    backgroundColor: 'rgba(16, 38, 32, 0.78)',
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    maxWidth: '86%',
+  },
+  statusPillText: {
+    color: Colors.inkOnMat,
+    fontSize: 11,
     fontWeight: '700',
-    color: Colors.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: Spacing.sm,
   },
-  samplePickerRow: {
-    gap: Spacing.sm,
-    paddingBottom: Spacing.md,
+  previewImage: {
+    width: '92%',
+    height: '86%',
   },
-  sampleChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: Radii.full,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  sampleChipActive: {
-    borderColor: Colors.ruler,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-  },
-  sampleChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.ink,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  btnSecondary: {
-    flex: 1,
-    flexDirection: 'row',
+  sampleWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    height: 48,
-    borderRadius: Radii.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    paddingTop: 22,
   },
-  btnSecondaryText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.ink,
+  sampleLabel: {
+    color: Colors.sage,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 4,
   },
-  btnPrimary: {
-    borderRadius: Radii.md,
-    overflow: 'hidden',
-    marginTop: Spacing.xs,
+  liveBox: {
+    gap: 10,
   },
-  btnGradient: {
-    height: 52,
+  shutterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  shutterBtn: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 4,
+    borderColor: '#ffffff',
+    backgroundColor: Colors.cut,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  matCard: {
+    backgroundColor: Colors.matCardBg,
+    borderWidth: 1.5,
+    borderColor: Colors.matCardBorder,
+    borderRadius: 16,
+    padding: 10,
     gap: 8,
   },
-  btnPrimaryText: {
-    fontSize: 15,
+  secHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sampleHeadText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: Colors.inkOnMat,
+  },
+  infoBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: Colors.sage,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoBtnText: {
+    color: Colors.ruler,
+    fontSize: 11,
     fontWeight: '800',
-    color: '#0D1210',
+  },
+  chipRow: {
+    gap: 7,
+  },
+  chip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 99,
+    borderWidth: 1.5,
+    borderColor: 'rgba(157, 184, 175, 0.4)',
+    backgroundColor: 'rgba(16, 38, 32, 0.72)',
+  },
+  chipActive: {
+    backgroundColor: Colors.ruler,
+    borderColor: Colors.ink,
+  },
+  chipText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: Colors.inkOnMat,
+  },
+  chipTextActive: {
+    color: Colors.ink,
+    fontWeight: '800',
+  },
+  infoDrawer: {
+    backgroundColor: 'rgba(16, 38, 32, 0.95)',
+    borderWidth: 1.5,
+    borderColor: Colors.ruler,
+    borderRadius: 14,
+    padding: 10,
+  },
+  infoText: {
+    fontSize: 11.5,
+    lineHeight: 17,
+    color: Colors.inkOnMat,
+  },
+  confirmBox: {
+    gap: 10,
+  },
+  confirmHint: {
+    fontSize: 12,
+    color: Colors.sage,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  btnRow: {
+    flexDirection: 'row',
+    gap: 8,
   },
 });

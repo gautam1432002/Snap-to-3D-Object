@@ -1,24 +1,44 @@
 /**
  * mobile/services/api.ts
  * ──────────────────────
- * Client API for Foldly backend integration:
- * - Scanned image upload (multipart/form-data with 'file')
- * - Generous 90s+ job polling with progressive status reporting
- * - Gemini AI polish and cutout sheet triggers
- * - Strict snake_case ↔ camelCase mappers
- * - Safe URL resolvers & Base64 image converter for 300 DPI PDF rendering
- * - 100% offline Demo Mode fallbacks
+ * Client API for Foldly FastAPI backend:
+ * - Runtime-configurable server URL persisted in AsyncStorage (with env fallback)
+ * - React Native FormData upload (no manual Content-Type so boundary sets cleanly)
+ * - Explicit error reporting on real photos (never hides backend failure behind demo mode)
+ * - /assets inline base64 + contour_json fetcher
+ * - Strict ContourPoint ({x, y}) normalization matching FastAPI Pydantic schemas
  */
 
 import { Platform } from 'react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { CreationItem, getOrCreateDeviceId } from './storage';
+import {
+  CreationItem,
+  getApiUrlOverride,
+  getOrCreateDeviceId,
+  setApiUrlOverride,
+} from './storage';
+import { ContourPoint, SAMPLE_TEMPLATES } from '../utils/sampleTemplates';
 
 const DEFAULT_URL =
   Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://localhost:8000';
 
-const rawBaseUrl = process.env.EXPO_PUBLIC_API_URL || DEFAULT_URL;
-export const API_BASE_URL = rawBaseUrl.replace(/\/+$/, '');
+const ENV_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || DEFAULT_URL).replace(/\/+$/, '');
+let cachedApiBaseUrl = ENV_BASE_URL;
+
+export function getEnvDefaultApiUrl(): string {
+  return ENV_BASE_URL;
+}
+
+export async function getActiveApiBaseUrl(): Promise<string> {
+  const override = await getApiUrlOverride();
+  cachedApiBaseUrl = override || ENV_BASE_URL;
+  return cachedApiBaseUrl;
+}
+
+export async function saveActiveApiBaseUrl(url: string | null): Promise<string> {
+  await setApiUrlOverride(url);
+  return getActiveApiBaseUrl();
+}
 
 export interface BackendHealth {
   status: string;
@@ -33,7 +53,7 @@ export interface QualityMetricsDto {
 }
 
 export interface ContourResultDto {
-  points: [number, number][];
+  points: Array<ContourPoint | [number, number]>;
   perimeter_mm: number;
   edge_color_hex: string;
   smoothness: string;
@@ -54,12 +74,38 @@ export interface ProjectResponse {
   dominant_colors: string[];
   quality_metrics?: QualityMetricsDto | null;
   contour?: ContourResultDto | null;
+  engine_used?: string | null;
+  ai_source?: string | null;
+  ai_warning?: string | null;
   preview_url?: string | null;
   trimmed_url?: string | null;
   polished_url?: string | null;
   sheet_url?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface ProjectAssetsResponse {
+  project_id: string;
+  status: string;
+  object_name: string;
+  suggested_name: string;
+  category: string;
+  complexity: string;
+  paper_size: string;
+  estimated_height_cm: number;
+  dominant_colors: string[];
+  quality_metrics?: QualityMetricsDto | null;
+  contour?: ContourResultDto | null;
+  perimeter_mm: number;
+  edge_color: string;
+  engine_used?: string | null;
+  ai_source?: string | null;
+  ai_warning?: string | null;
+  preview_base64?: string | null;
+  trimmed_base64?: string | null;
+  polished_base64?: string | null;
+  sheet_base64?: string | null;
 }
 
 export interface JobStatusResponse {
@@ -73,97 +119,57 @@ export interface JobStatusResponse {
   updated_at?: string;
 }
 
-// ── Built-in Demo Samples from PROJECT_SPEC.md §1 ────────────────────────────
+export function normalizeContourPoints(
+  points: Array<ContourPoint | [number, number]> | undefined | null
+): ContourPoint[] {
+  if (!Array.isArray(points)) return [];
+  return points
+    .map((pt) => {
+      if (Array.isArray(pt) && pt.length >= 2) {
+        return { x: Number(pt[0]) || 0, y: Number(pt[1]) || 0 };
+      }
+      const obj = pt as ContourPoint;
+      return { x: Number(obj?.x) || 0, y: Number(obj?.y) || 0 };
+    })
+    .filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y));
+}
 
-export const DEMO_SAMPLES: CreationItem[] = [
-  {
-    id: 'demo_crossing',
-    sampleId: 'crossing',
-    name: 'Pedestrian Crossing Sign',
-    category: 'Signs',
-    status: 'Ready',
-    buildStep: 0,
-    totalSteps: 7,
-    moldStyle: 'block',
-    heightCm: 18,
-    depthCm: 2.5,
-    edgeColorHex: '#F4C430',
-    updatedAt: Date.now() - 1000 * 60 * 60 * 2,
-    qualityMetrics: {
-      solidity: 0.88,
-      sharpness: 94.2,
-      cropEdgeQuality: 0.98,
-      pixelCoverage: 0.62,
-    },
+export const DEMO_SAMPLES: CreationItem[] = Object.values(SAMPLE_TEMPLATES).map((s) => ({
+  id: `demo_${s.id}`,
+  sampleId: s.id,
+  name: s.name,
+  category: s.category,
+  status: 'Ready',
+  buildStep: 0,
+  totalSteps: 7,
+  moldStyle: s.moldStyle,
+  heightCm: s.heightCm,
+  depthCm: s.depthCm,
+  smoothness: 'Medium',
+  includeStand: s.suggestStand,
+  edgeColorHex: s.edgeColorHex,
+  difficulty: s.difficulty,
+  estMinutes: s.estMinutes,
+  buildTip: s.buildTip,
+  updatedAt: Date.now(),
+  qualityMetrics: {
+    solidity: 0.94,
+    sharpness: 96,
+    cropEdgeQuality: 1.0,
+    pixelCoverage: 0.58,
   },
-  {
-    id: 'demo_sneaker',
-    sampleId: 'sneaker',
-    name: 'Retro Sneaker',
-    category: 'Style',
-    status: 'Building',
-    buildStep: 3,
-    totalSteps: 7,
-    moldStyle: 'block',
-    heightCm: 16,
-    depthCm: 3.2,
-    edgeColorHex: '#E63946',
-    updatedAt: Date.now() - 1000 * 60 * 60 * 12,
-    qualityMetrics: {
-      solidity: 0.76,
-      sharpness: 89.5,
-      cropEdgeQuality: 0.95,
-      pixelCoverage: 0.54,
-    },
+  contour: {
+    points: s.contour,
+    perimeterMm: 520,
+    edgeColorHex: s.edgeColorHex,
+    smoothness: 'Medium',
   },
-  {
-    id: 'demo_fox',
-    sampleId: 'fox',
-    name: 'Fox Sticker',
-    category: 'Animals',
-    status: 'Built',
-    buildStep: 7,
-    totalSteps: 7,
-    moldStyle: 'standee',
-    heightCm: 14,
-    depthCm: 1.0,
-    edgeColorHex: '#F5A623',
-    updatedAt: Date.now() - 1000 * 60 * 60 * 24,
-    qualityMetrics: {
-      solidity: 0.82,
-      sharpness: 91.0,
-      cropEdgeQuality: 0.99,
-      pixelCoverage: 0.48,
-    },
-  },
-  {
-    id: 'demo_boba',
-    sampleId: 'boba',
-    name: 'Boba Tea Cup',
-    category: 'Drinks',
-    status: 'Ready',
-    buildStep: 0,
-    totalSteps: 7,
-    moldStyle: 'block',
-    heightCm: 15,
-    depthCm: 2.8,
-    edgeColorHex: '#9DB8AF',
-    updatedAt: Date.now() - 1000 * 60 * 60 * 36,
-    qualityMetrics: {
-      solidity: 0.85,
-      sharpness: 88.0,
-      cropEdgeQuality: 0.97,
-      pixelCoverage: 0.58,
-    },
-  },
-];
+}));
 
-// ── URL & Mapper Helpers ──────────────────────────────────────────────────────
-
-/**
- * Resolves a relative or absolute URL against API_BASE_URL cleanly without double slashes.
- */
-export function resolveApiUrl(path: string | null | undefined): string | null {
+export function resolveApiUrl(
+  path: string | null | undefined,
+  baseOverride?: string
+): string | null {
   if (!path) return null;
   if (
     path.startsWith('data:') ||
@@ -173,13 +179,11 @@ export function resolveApiUrl(path: string | null | undefined): string | null {
   ) {
     return path;
   }
+  const base = (baseOverride || cachedApiBaseUrl).replace(/\/+$/, '');
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  return `${API_BASE_URL}${cleanPath}`;
+  return `${base}${cleanPath}`;
 }
 
-/**
- * Maps raw backend ProjectResponse (snake_case) to client CreationItem (camelCase)
- */
 export function mapProjectToCreationItem(p: ProjectResponse): CreationItem {
   const statusMap: Record<string, 'Ready' | 'Building' | 'Built'> = {
     ready: 'Ready',
@@ -190,14 +194,17 @@ export function mapProjectToCreationItem(p: ProjectResponse): CreationItem {
   return {
     id: p.project_id,
     name: p.suggested_name || p.object_name || 'Custom Craft',
-    category: p.category || 'Custom',
+    category: p.category || 'Everyday',
     status: statusMap[p.status.toLowerCase()] || 'Ready',
     buildStep: 0,
     totalSteps: 7,
     moldStyle: 'block',
     heightCm: p.estimated_height_cm || 18,
     depthCm: 2.5,
-    edgeColorHex: p.contour?.edge_color_hex || p.dominant_colors?.[0] || '#F4C430',
+    edgeColorHex: p.contour?.edge_color_hex || p.dominant_colors?.[0] || '#2EC4B6',
+    engineUsed: p.engine_used,
+    aiSource: p.ai_source,
+    aiWarning: p.ai_warning,
     previewUrl: resolveApiUrl(p.preview_url),
     trimmedUrl: resolveApiUrl(p.trimmed_url),
     polishedUrl: resolveApiUrl(p.polished_url),
@@ -205,38 +212,34 @@ export function mapProjectToCreationItem(p: ProjectResponse): CreationItem {
     updatedAt: p.updated_at ? new Date(p.updated_at).getTime() : Date.now(),
     qualityMetrics: p.quality_metrics
       ? {
-          solidity: p.quality_metrics.solidity ?? 0.85,
-          sharpness: p.quality_metrics.sharpness ?? 90.0,
-          cropEdgeQuality: p.quality_metrics.crop_edge_quality ?? 0.95,
-          pixelCoverage: p.quality_metrics.pixel_coverage ?? 0.5,
-        }
+        solidity: p.quality_metrics.solidity ?? 0.85,
+        sharpness: p.quality_metrics.sharpness ?? 90.0,
+        cropEdgeQuality: p.quality_metrics.crop_edge_quality ?? 0.95,
+        pixelCoverage: p.quality_metrics.pixel_coverage ?? 0.5,
+      }
       : undefined,
     contour: p.contour
       ? {
-          points: p.contour.points || [],
-          perimeterMm: p.contour.perimeter_mm || 0,
-          edgeColorHex: p.contour.edge_color_hex || '#888888',
-          smoothness: p.contour.smoothness || 'Medium',
-        }
+        points: normalizeContourPoints(p.contour.points),
+        perimeterMm: p.contour.perimeter_mm || 0,
+        edgeColorHex: p.contour.edge_color_hex || '#2EC4B6',
+        smoothness: p.contour.smoothness || 'Medium',
+      }
       : undefined,
   };
 }
 
-// ── Base64 Converter for 300-DPI Native Android PDF Printing ─────────────────
-
-/**
- * Converts a local file URI or remote HTTP image URL into a base64 data URI
- * (e.g. data:image/png;base64,...) so Android print rendering never fails on network/CORS.
- */
-export async function fetchImageAsBase64(imageUri: string | null | undefined): Promise<string | null> {
+export async function fetchImageAsBase64(
+  imageUri: string | null | undefined
+): Promise<string | null> {
   if (!imageUri) return null;
   if (imageUri.startsWith('data:image/')) return imageUri;
 
+  const baseUrl = await getActiveApiBaseUrl();
   const deviceId = await getOrCreateDeviceId();
-  const resolved = resolveApiUrl(imageUri) || imageUri;
+  const resolved = resolveApiUrl(imageUri, baseUrl) || imageUri;
 
   try {
-    // For local file:// or content:// URIs
     if (resolved.startsWith('file:') || resolved.startsWith('content:')) {
       const result = await ImageManipulator.manipulateAsync(resolved, [], {
         base64: true,
@@ -247,17 +250,10 @@ export async function fetchImageAsBase64(imageUri: string | null | undefined): P
       }
     }
 
-    // For remote http/https URIs
     const res = await fetch(resolved, {
-      headers: {
-        'X-Device-ID': deviceId,
-      },
+      headers: { 'X-Device-ID': deviceId },
     });
-
-    if (!res.ok) {
-      console.warn(`[Base64] Fetch failed for ${resolved} (HTTP ${res.status})`);
-      return null;
-    }
+    if (!res.ok) return null;
 
     const blob = await res.blob();
     return new Promise((resolve) => {
@@ -265,49 +261,48 @@ export async function fetchImageAsBase64(imageUri: string | null | undefined): P
       reader.onloadend = () => {
         resolve(typeof reader.result === 'string' ? reader.result : null);
       };
-      reader.onerror = () => {
-        console.warn('[Base64] FileReader error reading blob');
-        resolve(null);
-      };
+      reader.onerror = () => resolve(null);
       reader.readAsDataURL(blob);
     });
   } catch (err) {
-    console.warn('[Base64] Error converting image to base64:', err);
+    console.warn('[Base64] Conversion failed:', err);
     return null;
   }
 }
 
-// ── API Methods ───────────────────────────────────────────────────────────────
-
-export async function checkBackendHealth(): Promise<{ ok: boolean; statusText: string }> {
+export async function checkBackendHealth(
+  customUrl?: string
+): Promise<{ ok: boolean; statusText: string; url: string }> {
+  const targetUrl = (customUrl ? customUrl.trim().replace(/\/+$/, '') : await getActiveApiBaseUrl());
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
+    const timeout = setTimeout(() => controller.abort(), 3000);
 
-    const res = await fetch(`${API_BASE_URL}/health`, {
+    const res = await fetch(`${targetUrl}/health`, {
       signal: controller.signal,
     });
     clearTimeout(timeout);
 
     if (res.ok) {
       const data: BackendHealth = await res.json();
-      return { ok: true, statusText: data.status || 'online' };
+      return { ok: true, statusText: data.status || 'online', url: targetUrl };
     }
-    return { ok: false, statusText: `HTTP ${res.status}` };
+    return { ok: false, statusText: `HTTP ${res.status}`, url: targetUrl };
   } catch (err: any) {
-    return { ok: false, statusText: err.message || 'offline' };
+    return {
+      ok: false,
+      statusText: err?.name === 'AbortError' ? 'Timed out (3s)' : err?.message || 'Unreachable',
+      url: targetUrl,
+    };
   }
 }
 
-/**
- * Uploads camera/gallery photo to FastAPI /api/v1/projects/scan
- * uses form field 'file' and header 'X-Device-ID'
- */
 export async function uploadScan(
   fileUri: string,
   mimeType: string = 'image/jpeg',
   filename: string = 'scan.jpg'
 ): Promise<{ project_id: string; job_id: string; status: string }> {
+  const baseUrl = await getActiveApiBaseUrl();
   const deviceId = await getOrCreateDeviceId();
 
   const formData = new FormData();
@@ -317,42 +312,65 @@ export async function uploadScan(
     name: filename,
   } as any);
 
-  const res = await fetch(`${API_BASE_URL}/api/v1/projects/scan`, {
-    method: 'POST',
-    headers: {
-      'X-Device-ID': deviceId,
-    },
-    body: formData,
-  });
+  const target = `${baseUrl}/api/v1/projects/scan`;
+  console.log(`[API] Uploading scan to ${target}`);
 
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.detail || `Scan upload failed with HTTP ${res.status}`);
+  let res: Response;
+  try {
+    // NEVER manually set Content-Type on FormData fetch so RN attaches the boundary
+    res = await fetch(target, {
+      method: 'POST',
+      headers: {
+        'X-Device-ID': deviceId,
+      },
+      body: formData,
+    });
+  } catch (networkErr: any) {
+    throw new Error(
+      `Cannot reach ${baseUrl} — ensure FastAPI is running on port 8000 and allowed in Windows Firewall. (${networkErr?.message || 'Network request failed'})`
+    );
   }
 
+  const rawBody = await res.text();
+  if (!res.ok) {
+    console.warn(`[API] Upload error HTTP ${res.status}: ${rawBody}`);
+    let detail = rawBody;
+    try {
+      const parsed = JSON.parse(rawBody);
+      if (parsed.detail) detail = parsed.detail;
+    } catch { }
+    throw new Error(`Server ${baseUrl} returned HTTP ${res.status}: ${detail}`);
+  }
+
+  return JSON.parse(rawBody);
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
+  const baseUrl = await getActiveApiBaseUrl();
+  const res = await fetch(`${baseUrl}/api/v1/jobs/${jobId}`);
+  if (!res.ok) {
+    throw new Error(`Failed to get job status (HTTP ${res.status})`);
+  }
   return res.json();
 }
 
-/**
- * Polls background scan job status with generous 90s+ timeout
- * (accounts for initial rembg ONNX model download)
- */
 export async function pollJobUntilDone(
   jobId: string,
   onProgress?: (progress: number, stageDesc: string) => void,
   maxAttempts: number = 65,
-  intervalMs: number = 1500
+  intervalMs: number = 1400
 ): Promise<JobStatusResponse> {
   const stageDescriptions: Record<string, string> = {
-    uploaded: 'Image received, preparing pipeline...',
-    segmentation: 'Neural subject segmentation (downloading AI model on first run)...',
-    contour: 'Tracing sub-pixel polygon vector contour...',
-    metadata: 'Extracting dimensions and papercraft parameters...',
-    done: 'Subject lift complete!',
-    failed: 'Segmentation pipeline encountered an error.',
+    uploaded: 'Photo received, queuing AI pipeline...',
+    segmentation: 'Isolating subject edge-by-edge (RMBG / GrabCut)...',
+    contour: 'Tracing vector silhouette contour...',
+    metadata: 'Identifying object & craft parameters with Gemini...',
+    done: 'Subject lifted cleanly!',
+    failed: 'Segmentation pipeline failed.',
   };
 
   let attempts = 0;
+  let lastErr: Error | null = null;
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -360,115 +378,102 @@ export async function pollJobUntilDone(
 
     try {
       const job = await getJobStatus(jobId);
-      const desc = stageDescriptions[job.stage] || `Processing stage: ${job.stage}`;
+      const desc = stageDescriptions[job.stage] || `Processing: ${job.stage}`;
+      onProgress?.(job.progress, desc);
 
-      if (onProgress) {
-        onProgress(job.progress, desc);
-      }
-
-      if (job.status === 'done') {
-        return job;
-      }
+      if (job.status === 'done') return job;
       if (job.status === 'failed') {
         throw new Error(job.error || 'Backend processing job failed.');
       }
     } catch (err: any) {
-      if (attempts >= maxAttempts) {
+      lastErr = err;
+      if (err?.message?.includes('Backend processing job failed')) {
         throw err;
+      }
+      if (attempts >= maxAttempts) {
+        throw lastErr || new Error('Job polling timed out.');
       }
     }
   }
 
-  throw new Error('Pipeline timed out after 90 seconds. Please try again or use Demo Mode.');
+  throw new Error('Scan timed out after 90 seconds. Check server logs and retry.');
 }
 
-export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/v1/jobs/${jobId}`);
-  if (!res.ok) {
-    throw new Error(`Failed to get job status (${res.status})`);
-  }
-  return res.json();
-}
-
-export async function getProjectDetails(projectId: string): Promise<ProjectResponse> {
+export async function getProjectAssets(
+  projectId: string,
+  options?: { smoothness?: 'Easy' | 'Medium' | 'Hard'; heightCm?: number }
+): Promise<ProjectAssetsResponse> {
+  const baseUrl = await getActiveApiBaseUrl();
   const deviceId = await getOrCreateDeviceId();
-  const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}`, {
-    headers: {
-      'X-Device-ID': deviceId,
-    },
+
+  const params: string[] = [];
+  if (options?.smoothness) params.push(`smoothness=${encodeURIComponent(options.smoothness)}`);
+  if (options?.heightCm) params.push(`height_cm=${encodeURIComponent(String(options.heightCm))}`);
+  const qs = params.length ? `?${params.join('&')}` : '';
+
+  const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/assets${qs}`, {
+    headers: { 'X-Device-ID': deviceId },
   });
   if (!res.ok) {
-    throw new Error(`Failed to load project details (${res.status})`);
+    const body = await res.text().catch(() => '');
+    throw new Error(`Failed to load project assets (HTTP ${res.status}): ${body}`);
   }
   return res.json();
-}
-
-export async function fetchProjects(limit: number = 20, offset: number = 0): Promise<ProjectResponse[]> {
-  const deviceId = await getOrCreateDeviceId();
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/v1/projects?limit=${limit}&offset=${offset}`, {
-      headers: {
-        'X-Device-ID': deviceId,
-      },
-    });
-
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    return data.items || [];
-  } catch (err) {
-    console.warn('Backend fetchProjects failed (using offline mode):', err);
-    return [];
-  }
 }
 
 export async function triggerPolish(
   projectId: string,
   croppedSides: string[] = []
-): Promise<{ status: string; polished_url?: string }> {
-  try {
-    const deviceId = await getOrCreateDeviceId();
-    const query = croppedSides.map((s) => `cropped_sides=${encodeURIComponent(s)}`).join('&');
-    const url = `${API_BASE_URL}/api/v1/projects/${projectId}/polish${query ? `?${query}` : ''}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'X-Device-ID': deviceId,
-      },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        status: data.status,
-        polished_url: resolveApiUrl(data.polished_url) || undefined,
-      };
-    }
-  } catch (err) {
-    console.warn('Polish failed, fallback to local:', err);
+): Promise<{
+  status: string;
+  polished_url?: string;
+  polished_base64?: string;
+  contour?: ContourResultDto | null;
+  ai_source?: string;
+  ai_warning?: string | null;
+}> {
+  const baseUrl = await getActiveApiBaseUrl();
+  const deviceId = await getOrCreateDeviceId();
+  const query = croppedSides.map((s) => `cropped_sides=${encodeURIComponent(s)}`).join('&');
+  const url = `${baseUrl}/api/v1/projects/${projectId}/polish${query ? `?${query}` : ''}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'X-Device-ID': deviceId },
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`Polish failed (HTTP ${res.status}): ${msg}`);
   }
-  return { status: 'polished', polished_url: undefined };
+  const data = await res.json();
+  return {
+    ...data,
+    polished_url: resolveApiUrl(data.polished_url, baseUrl) || undefined,
+  };
 }
 
 export async function triggerCutoutSheet(
   projectId: string
-): Promise<{ status: string; sheet_url?: string }> {
-  try {
-    const deviceId = await getOrCreateDeviceId();
-    const res = await fetch(`${API_BASE_URL}/api/v1/projects/${projectId}/cutout-sheet`, {
-      method: 'POST',
-      headers: {
-        'X-Device-ID': deviceId,
-      },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return {
-        status: data.status,
-        sheet_url: resolveApiUrl(data.sheet_url) || undefined,
-      };
-    }
-  } catch (err) {
-    console.warn('Cutout sheet failed, fallback to local:', err);
+): Promise<{
+  status: string;
+  sheet_url?: string;
+  sheet_base64?: string;
+  ai_source?: string;
+  ai_warning?: string | null;
+}> {
+  const baseUrl = await getActiveApiBaseUrl();
+  const deviceId = await getOrCreateDeviceId();
+  const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/cutout-sheet`, {
+    method: 'POST',
+    headers: { 'X-Device-ID': deviceId },
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`Cutout sheet failed (HTTP ${res.status}): ${msg}`);
   }
-  return { status: 'generated', sheet_url: undefined };
+  const data = await res.json();
+  return {
+    ...data,
+    sheet_url: resolveApiUrl(data.sheet_url, baseUrl) || undefined,
+  };
 }

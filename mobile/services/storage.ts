@@ -1,24 +1,36 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import { ContourPoint } from '../utils/sampleTemplates';
 
 export interface CreationItem {
   id: string;
   name: string;
   category: string;
-  thumbUrl?: string;
+  thumbUrl?: string | null;
   previewUrl?: string | null;
   trimmedUrl?: string | null;
   polishedUrl?: string | null;
   sheetUrl?: string | null;
+  trimmedBase64?: string | null;
+  polishedBase64?: string | null;
+  sheetBase64?: string | null;
   status: 'Ready' | 'Building' | 'Built';
   buildStep: number;
   totalSteps: number;
   moldStyle: 'block' | 'standee';
   heightCm: number;
   depthCm: number;
+  smoothness?: 'Easy' | 'Medium' | 'Hard';
+  includeStand?: boolean;
   sampleId?: string | null;
   updatedAt: number;
   edgeColorHex?: string;
+  difficulty?: string;
+  estMinutes?: number;
+  buildTip?: string;
+  engineUsed?: string | null;
+  aiSource?: string | null;
+  aiWarning?: string | null;
   qualityMetrics?: {
     solidity: number;
     sharpness: number;
@@ -26,7 +38,7 @@ export interface CreationItem {
     pixelCoverage?: number;
   };
   contour?: {
-    points: [number, number][];
+    points: ContourPoint[];
     perimeterMm: number;
     edgeColorHex: string;
     smoothness: string;
@@ -52,6 +64,7 @@ const STORAGE_KEYS = {
   STATS: '@foldly_stats',
   PAPER_SIZE: '@foldly_paper_size',
   ONBOARDING_DONE: '@foldly_onboarding_done',
+  API_URL_OVERRIDE: '@foldly_api_url',
 };
 
 // ── Unique Device ID ──────────────────────────────────────────────────────────
@@ -66,6 +79,29 @@ export async function getOrCreateDeviceId(): Promise<string> {
     return newId;
   } catch {
     return 'dev_fallback_guest';
+  }
+}
+
+// ── Custom Backend URL Override ───────────────────────────────────────────────
+
+export async function getApiUrlOverride(): Promise<string | null> {
+  try {
+    const val = await AsyncStorage.getItem(STORAGE_KEYS.API_URL_OVERRIDE);
+    return val ? val.trim().replace(/\/+$/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setApiUrlOverride(url: string | null): Promise<void> {
+  try {
+    if (!url || !url.trim()) {
+      await AsyncStorage.removeItem(STORAGE_KEYS.API_URL_OVERRIDE);
+    } else {
+      await AsyncStorage.setItem(STORAGE_KEYS.API_URL_OVERRIDE, url.trim().replace(/\/+$/, ''));
+    }
+  } catch (err) {
+    console.warn('Failed to save API URL override:', err);
   }
 }
 
@@ -85,7 +121,7 @@ export async function saveCreation(item: CreationItem): Promise<void> {
   try {
     const list = await getSavedCreations();
     const filtered = list.filter((c) => c.id !== item.id);
-    const updated = [item, ...filtered];
+    const updated = [item, ...filtered].slice(0, 18);
     await AsyncStorage.setItem(STORAGE_KEYS.CREATIONS, JSON.stringify(updated));
   } catch (err) {
     console.warn('Failed to save creation:', err);
@@ -142,7 +178,6 @@ export async function checkAndUnlockBadges(stage: number, status?: string): Prom
   try {
     if (stage >= 2) {
       await unlockBadge('firstCutout');
-      await incrementScanned();
     }
     if (stage >= 3) {
       await unlockBadge('puff3d');
@@ -191,7 +226,7 @@ export async function incrementBuilt(): Promise<void> {
   }
 }
 
-// ── Preferences ───────────────────────────────────────────────────────────────
+// ── Preferences & Onboarding ──────────────────────────────────────────────────
 
 export async function getPaperPreference(): Promise<'A4' | 'Letter'> {
   try {
@@ -207,5 +242,22 @@ export async function setPaperPreference(pref: 'A4' | 'Letter'): Promise<void> {
     await AsyncStorage.setItem(STORAGE_KEYS.PAPER_SIZE, pref);
   } catch (err) {
     console.warn('Failed to set paper pref:', err);
+  }
+}
+
+export async function getOnboardingDone(): Promise<boolean> {
+  try {
+    const val = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_DONE);
+    return val === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export async function setOnboardingDone(done: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_DONE, done ? 'true' : 'false');
+  } catch (err) {
+    console.warn('Failed to set onboarding status:', err);
   }
 }
