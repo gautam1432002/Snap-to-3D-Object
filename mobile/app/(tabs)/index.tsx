@@ -1,40 +1,66 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import Animated, {
+  FadeInDown,
+  useSharedValue,
+  useAnimatedProps,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import Svg, { Circle } from 'react-native-svg';
 import { SvgXml } from 'react-native-svg';
-import { Colors, Typography } from '../../constants/theme';
+import { Server } from 'lucide-react-native';
+import { Colors } from '../../constants/theme';
 import { CuttingMatBackground } from '../../components/CuttingMatBackground';
 import { PaperSheet } from '../../components/PaperSheet';
+import { CraftButton } from '../../components/CraftButton';
 import { ServerUrlModal } from '../../components/ServerUrlModal';
 import { checkBackendHealth, DEMO_SAMPLES } from '../../services/api';
-import { CreationItem, getSavedCreations } from '../../services/storage';
+import { CreationItem, getSavedCreations, getStats, UserStats } from '../../services/storage';
 import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+const PASTEL_BARS: Array<[string, string]> = [
+  ['#7DD3FC', '#38BDF8'], // Mon - sky blue
+  ['#86EFAC', '#34D399'], // Tue - mint
+  ['#F9A8D4', '#C084FC'], // Wed - pink-purple
+  ['#FDBA74', '#FB923C'], // Thu - warm orange
+  ['#C4B5FD', '#818CF8'], // Fri - lavender
+  ['#93C5FD', '#3B82F6'], // Sat - bright blue
+  ['#6EE7B7', '#10B981'], // Sun - fresh mint
+];
+
+const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-  const [backendUrl, setBackendUrl] = useState<string>('');
   const [creations, setCreations] = useState<CreationItem[]>([]);
+  const [stats, setStats] = useState<UserStats>({ objectsScanned: 0, craftsBuilt: 0 });
   const [serverModalOpen, setServerModalOpen] = useState(false);
 
+  const ringProgress = useSharedValue(0);
+
   const refreshData = useCallback(async () => {
-    const [health, list] = await Promise.all([
+    const [health, list, userStats] = await Promise.all([
       checkBackendHealth(),
       getSavedCreations(),
+      getStats(),
     ]);
     setBackendOnline(health.ok);
-    setBackendUrl(health.url);
     setCreations(list);
+    setStats(userStats);
   }, []);
 
   useFocusEffect(
@@ -43,22 +69,44 @@ export default function HomeScreen() {
     }, [refreshData])
   );
 
-  const ongoing = creations.find((c) => c.status === 'Building');
+  // Weekly Goal metrics computed from local creations & stats
+  const liftedCount = Math.max(stats.objectsScanned, creations.length);
+  const builtCount = Math.max(stats.craftsBuilt, creations.filter((c) => c.status === 'Built').length);
+  const weekGoalTarget = 5;
+  const weekCompleted = Math.min(weekGoalTarget, Math.max(builtCount, creations.length > 0 ? Math.min(3, creations.length) : 0));
+  const goalPct = Math.round((weekCompleted / weekGoalTarget) * 100);
+  const streakDays = creations.length > 0 ? Math.min(14, Math.max(1, creations.length)) : 1;
+
+  // SVG Ring animation
+  const ringR = 37;
+  const ringCirc = 2 * Math.PI * ringR;
+  useEffect(() => {
+    ringProgress.value = withTiming(Math.max(0.08, weekCompleted / weekGoalTarget), {
+      duration: 750,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [weekCompleted]);
+
+  const animatedRingProps = useAnimatedProps(() => ({
+    strokeDashoffset: ringCirc * (1 - ringProgress.value),
+  }));
+
+  // 7-day weekly activity calculation (Mon=0 .. Sun=6)
+  const dayCounts = [0, 0, 0, 0, 0, 0, 0];
+  creations.forEach((c) => {
+    if (!c.updatedAt) return;
+    const d = new Date(c.updatedAt).getDay();
+    const monFirst = d === 0 ? 6 : d - 1;
+    dayCounts[monFirst] += 1;
+  });
+  const todayJs = new Date().getDay();
+  const todayIdx = todayJs === 0 ? 6 : todayJs - 1;
+  const maxDayCount = Math.max(3, ...dayCounts);
 
   const launchTemplate = (sampleId: string) => {
     router.push({
       pathname: '/workflow',
       params: { sampleId },
-    });
-  };
-
-  const openSavedCreation = (c: CreationItem) => {
-    router.push({
-      pathname: '/workflow',
-      params: {
-        creationId: c.id,
-        sampleId: c.sampleId || undefined,
-      },
     });
   };
 
@@ -69,114 +117,127 @@ export default function HomeScreen() {
           styles.scrollContent,
           {
             paddingTop: Math.max(insets.top, 28) + 8,
-            paddingBottom: Math.max(insets.bottom, 14) + 96,
+            paddingBottom: Math.max(insets.bottom, 16) + 102,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header + Tappable Server Status Pill */}
+        {/* Top Greeting Bar */}
         <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.hand}>hello, maker! 👋</Text>
-            <Text style={styles.heroTitle}>
-              Snap an object.{'\n'}Craft it in 3D paper.
-            </Text>
+          <View style={styles.greetingLeft}>
+            <View style={styles.avatarCircle}>
+              <Text style={{ fontSize: 22 }}>🎨</Text>
+            </View>
+            <View>
+              <Text style={styles.greetingTitle}>Hey, Maker!</Text>
+              <Text style={styles.greetingSub}>Ready to craft in 3D?</Text>
+            </View>
           </View>
 
           <TouchableOpacity
             onPress={() => setServerModalOpen(true)}
             activeOpacity={0.8}
-            style={[
-              styles.statusPill,
-              backendOnline ? styles.statusOnline : styles.statusOffline,
-            ]}
+            style={styles.serverCircleBtn}
+            accessibilityLabel="Server Status"
           >
+            <Server size={18} color={Colors.ink} strokeWidth={2.2} />
             <View
               style={[
-                styles.statusDot,
+                styles.liveDot,
                 {
                   backgroundColor:
                     backendOnline === null
-                      ? Colors.ruler
+                      ? Colors.gold
                       : backendOnline
-                      ? Colors.teal
+                      ? '#22C55E'
                       : Colors.cut,
                 },
               ]}
             />
-            <Text style={styles.statusText} numberOfLines={1}>
-              {backendOnline === null
-                ? 'Checking...'
-                : backendOnline
-                ? 'Connected'
-                : 'Offline — Set IP'}
-            </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Prominent White Paper Scan Real Object CTA Card */}
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => router.push('/workflow')}
+        {/* Royal-Blue Hero Stats Card */}
+        <LinearGradient
+          colors={[Colors.heroBlueStart, Colors.heroBlueEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.heroCard}
         >
-          <PaperSheet style={styles.scanCta}>
-            <View style={styles.scanThumb}>
-              <Text style={{ fontSize: 32 }}>📸</Text>
-            </View>
+          <View style={styles.heroTopRow}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.scanTitle}>Scan Real Object</Text>
-              <Text style={styles.scanDesc}>
-                Snap or pick any photo to lift a sharp cutout, inspect it in Crisp 3D, and print exact-scale PDF sheets.
+              <Text style={styles.heroOverline}>✂️ Weekly Craft Goal</Text>
+              <Text style={styles.heroCount}>
+                {weekCompleted} <Text style={styles.heroTotal}>/ {weekGoalTarget}</Text>
               </Text>
-              <View style={styles.ctaPill}>
-                <Text style={styles.ctaPillText}>
-                  ✂️ Cutout → 🧊 Crisp 3D → 🖨️ PDF
-                </Text>
+              <Text style={styles.heroCaption}>Objects crafted this week</Text>
+            </View>
+
+            {/* Golden Circular Progress Ring */}
+            <View style={styles.ringWrap}>
+              <Svg width={92} height={92} viewBox="0 0 92 92">
+                <Circle
+                  cx={46}
+                  cy={46}
+                  r={ringR}
+                  stroke="rgba(255,255,255,0.24)"
+                  strokeWidth={8}
+                  fill="none"
+                />
+                <AnimatedCircle
+                  cx={46}
+                  cy={46}
+                  r={ringR}
+                  stroke={Colors.gold}
+                  strokeWidth={8}
+                  strokeLinecap="round"
+                  fill="none"
+                  strokeDasharray={`${ringCirc} ${ringCirc}`}
+                  animatedProps={animatedRingProps}
+                  transform="rotate(-90 46 46)"
+                />
+              </Svg>
+              <View style={styles.ringCenterIcon}>
+                <Text style={{ fontSize: 22 }}>🧊</Text>
+              </View>
+              <View style={styles.pctBadge}>
+                <Text style={styles.pctBadgeText}>{goalPct}%</Text>
               </View>
             </View>
-          </PaperSheet>
-        </TouchableOpacity>
+          </View>
 
-        {/* Dynamic Continue Building Banner */}
-        {ongoing && (
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => openSavedCreation(ongoing)}
-            style={styles.continueCard}
-          >
-            <View style={styles.continueThumb}>
-              {ongoing.trimmedBase64 || ongoing.trimmedUrl ? (
-                <Image
-                  source={{ uri: ongoing.trimmedBase64 || ongoing.trimmedUrl || '' }}
-                  style={{ width: 38, height: 38 }}
-                  resizeMode="contain"
-                />
-              ) : ongoing.sampleId && SAMPLE_TEMPLATES[ongoing.sampleId as keyof typeof SAMPLE_TEMPLATES] ? (
-                <SvgXml
-                  xml={SAMPLE_TEMPLATES[ongoing.sampleId as keyof typeof SAMPLE_TEMPLATES].svgMarkup}
-                  width={38}
-                  height={38}
-                />
-              ) : (
-                <Text style={{ fontSize: 22 }}>✂️</Text>
-              )}
+          {/* 3 Floating Pure-White Pill Chips */}
+          <View style={styles.heroPillsRow}>
+            <View style={styles.heroPill}>
+              <Text style={styles.heroPillText}>✂️ {liftedCount} Lifted</Text>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.continueOverline}>CONTINUE BUILDING</Text>
-              <Text style={styles.continueTitle} numberOfLines={1}>
-                {ongoing.name}
-              </Text>
+            <View style={styles.heroPill}>
+              <Text style={styles.heroPillText}>🧊 {builtCount} Built</Text>
             </View>
-            <View style={styles.stepPill}>
-              <Text style={styles.stepPillText}>Resume ›</Text>
+            <View style={styles.heroPill}>
+              <Text style={styles.heroPillText}>🔥 {streakDays}d Streak</Text>
             </View>
-          </TouchableOpacity>
-        )}
+          </View>
+        </LinearGradient>
 
-        {/* Compact 4-Sample Horizontal Strip */}
+        {/* Spotlight Scan CTA */}
+        <PaperSheet style={styles.spotlightCard}>
+          <Text style={styles.spotlightTitle}>Snap & Fold in 3D!</Text>
+          <Text style={styles.spotlightSub}>
+            Turn any real object into a razor-sharp 3D papercraft template.
+          </Text>
+          <CraftButton
+            title="Scan Real Object"
+            variant="primary"
+            onPress={() => router.push('/workflow')}
+            style={{ width: '100%' }}
+          />
+        </PaperSheet>
+
+        {/* Instant 3D Samples Horizontal Strip */}
         <View style={styles.secHead}>
-          <Text style={styles.secTitle}>Try a Sample Craft</Text>
-          <Text style={styles.secHint}>Instant offline demo</Text>
+          <Text style={styles.secTitle}>Instant 3D Samples</Text>
+          <Text style={styles.secHint}>Tap to preview</Text>
         </View>
         <ScrollView
           horizontal
@@ -191,82 +252,70 @@ export default function HomeScreen() {
                 entering={FadeInDown.duration(280).delay(idx * 45).springify()}
               >
                 <TouchableOpacity
-                  activeOpacity={0.85}
+                  activeOpacity={0.86}
                   onPress={() => launchTemplate(tpl.id)}
-                  style={styles.tplCard}
+                  style={styles.sampleCard}
                 >
-                  <View style={styles.tplSvgWrap}>
-                    <SvgXml xml={tpl.svgMarkup} width={54} height={54} />
+                  <View style={styles.sampleIconBg}>
+                    <SvgXml xml={tpl.svgMarkup} width={50} height={50} />
                   </View>
-                  <Text style={styles.tplTitle} numberOfLines={1}>
+                  <Text style={styles.sampleTitle} numberOfLines={1}>
                     {tpl.shortName}
                   </Text>
-                  <Text style={styles.tplSub}>{tpl.heightCm} cm</Text>
+                  <Text style={styles.sampleMeta}>{tpl.heightCm} cm</Text>
                 </TouchableOpacity>
               </Animated.View>
             );
           })}
         </ScrollView>
 
-        {/* Recent Creations */}
-        {creations.length > 0 && (
-          <>
-            <View style={styles.secHead}>
-              <Text style={styles.secTitle}>Recent Crafts</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/creations')}>
-                <Text style={styles.secLink}>See all ›</Text>
-              </TouchableOpacity>
-            </View>
+        {/* Your Craft Activity Card (7 Pastel Capsule Bars) */}
+        <PaperSheet style={styles.activityCard}>
+          <View style={styles.activityHead}>
+            <Text style={styles.activityTitle}>Your Craft Activity</Text>
+            <Text style={styles.activitySub}>Last 7 days</Text>
+          </View>
 
-            <View style={{ gap: 8 }}>
-              {creations.slice(0, 3).map((c) => {
-                const tpl = c.sampleId
-                  ? SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]
-                  : null;
-                return (
-                  <TouchableOpacity
-                    key={c.id}
-                    activeOpacity={0.85}
-                    onPress={() => openSavedCreation(c)}
-                    style={styles.recentRow}
-                  >
-                    <View style={styles.recentThumb}>
-                      {c.trimmedBase64 || c.trimmedUrl ? (
-                        <Image
-                          source={{ uri: c.trimmedBase64 || c.trimmedUrl || '' }}
-                          style={{ width: 34, height: 34 }}
-                          resizeMode="contain"
-                        />
-                      ) : tpl ? (
-                        <SvgXml xml={tpl.svgMarkup} width={34} height={34} />
-                      ) : (
-                        <Text style={{ fontSize: 20 }}>✂️</Text>
-                      )}
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.recentName} numberOfLines={1}>
-                        {c.name}
-                      </Text>
-                      <Text style={styles.recentSub}>{c.heightCm} cm • Crisp 3D</Text>
-                    </View>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{c.status}</Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </>
-        )}
+          <View style={styles.barsRow}>
+            {WEEK_DAYS.map((day, i) => {
+              const count = dayCounts[i];
+              const visualRatio = count > 0 ? Math.max(0.32, count / maxDayCount) : 0.24 + (i % 3) * 0.14;
+              const barH = Math.round(visualRatio * 74);
+              const isToday = i === todayIdx;
+              const colors = PASTEL_BARS[i];
+
+              return (
+                <View key={day} style={styles.barCol}>
+                  <View style={styles.barSlot}>
+                    {isToday && (
+                      <View style={styles.activeCountPill}>
+                        <Text style={styles.activeCountText}>{count}</Text>
+                      </View>
+                    )}
+                    <LinearGradient
+                      colors={colors}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 0, y: 1 }}
+                      style={[
+                        styles.capsuleBar,
+                        { height: barH, opacity: count > 0 || isToday ? 1 : 0.62 },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.dayLabel, isToday && styles.dayLabelActive]}>
+                    {day}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </PaperSheet>
       </ScrollView>
 
       <ServerUrlModal
         visible={serverModalOpen}
         onClose={() => setServerModalOpen(false)}
-        onSaved={(newUrl, ok) => {
-          setBackendUrl(newUrl);
-          setBackendOnline(ok);
-        }}
+        onSaved={(_, ok) => setBackendOnline(ok)}
       />
     </CuttingMatBackground>
   );
@@ -279,127 +328,164 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
   },
-  hand: {
-    ...Typography.handwritten,
-    fontSize: 21,
-  },
-  heroTitle: {
-    ...Typography.hero,
-    marginTop: 2,
-  },
-  statusPill: {
+  greetingLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 99,
-    borderWidth: 1.2,
-    marginTop: 4,
+    gap: 11,
   },
-  statusOnline: {
-    backgroundColor: 'rgba(46, 196, 182, 0.16)',
-    borderColor: 'rgba(46, 196, 182, 0.5)',
-  },
-  statusOffline: {
-    backgroundColor: 'rgba(230, 57, 70, 0.18)',
-    borderColor: 'rgba(230, 57, 70, 0.55)',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    color: Colors.inkOnMat,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  scanCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 15,
-  },
-  scanThumb: {
-    width: 64,
-    height: 76,
-    borderRadius: 14,
-    backgroundColor: '#e9f3ef',
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: '#7ea698',
+  avatarCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: Colors.gold,
+    borderWidth: 2.5,
+    borderColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  scanTitle: {
-    fontSize: 18,
+  greetingTitle: {
+    fontSize: 20,
     fontWeight: '800',
     color: Colors.ink,
+    letterSpacing: -0.3,
   },
-  scanDesc: {
-    fontSize: 12,
-    color: '#4b5a55',
-    marginTop: 3,
-    lineHeight: 17,
+  greetingSub: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#2A4E6E',
   },
-  ctaPill: {
-    alignSelf: 'flex-start',
-    marginTop: 8,
-    paddingVertical: 3,
-    paddingHorizontal: 10,
-    borderRadius: 99,
-    backgroundColor: Colors.ruler,
-    borderWidth: 1.5,
-    borderColor: Colors.ink,
-  },
-  ctaPillText: {
-    fontSize: 10.5,
-    fontWeight: '800',
-    color: Colors.ink,
-  },
-  continueCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(46, 196, 182, 0.18)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(46, 196, 182, 0.55)',
-    borderRadius: 16,
-    padding: 10,
-  },
-  continueThumb: {
+  serverCircleBtn: {
     width: 44,
     height: 44,
-    borderRadius: 10,
-    backgroundColor: '#ffffff',
+    borderRadius: 22,
+    backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  continueOverline: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: Colors.teal,
+  liveDot: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    borderWidth: 1.5,
+    borderColor: Colors.white,
   },
-  continueTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: Colors.inkOnMat,
+  heroCard: {
+    borderRadius: 28,
+    padding: 18,
+    gap: 14,
+    shadowColor: '#1E40AF',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.24,
+    shadowRadius: 22,
+    elevation: 8,
   },
-  stepPill: {
-    backgroundColor: Colors.ruler,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  heroOverline: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.9)',
+  },
+  heroCount: {
+    fontSize: 38,
+    fontWeight: '900',
+    color: Colors.white,
+    lineHeight: 42,
+    marginTop: 4,
+  },
+  heroTotal: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.75)',
+  },
+  heroCaption: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 2,
+  },
+  ringWrap: {
+    width: 92,
+    height: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  ringCenterIcon: {
+    position: 'absolute',
+    top: 32,
+  },
+  pctBadge: {
+    position: 'absolute',
+    bottom: 0,
+    paddingVertical: 2,
+    paddingHorizontal: 9,
     borderRadius: 99,
+    backgroundColor: Colors.goldDeep,
+    borderWidth: 1.5,
+    borderColor: Colors.white,
   },
-  stepPillText: {
+  pctBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: Colors.white,
+  },
+  heroPillsRow: {
+    flexDirection: 'row',
+    gap: 7,
+  },
+  heroPill: {
+    flex: 1,
+    backgroundColor: Colors.white,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  heroPillText: {
     fontSize: 11,
     fontWeight: '800',
     color: Colors.ink,
+  },
+  spotlightCard: {
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  spotlightTitle: {
+    fontSize: 21,
+    fontWeight: '800',
+    color: Colors.ink,
+    textAlign: 'center',
+  },
+  spotlightSub: {
+    fontSize: 12.5,
+    color: Colors.muted,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 4,
   },
   secHead: {
     flexDirection: 'row',
@@ -408,93 +494,112 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   secTitle: {
-    fontSize: 15.5,
+    fontSize: 16,
     fontWeight: '800',
-    color: Colors.inkOnMat,
+    color: Colors.ink,
   },
   secHint: {
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '600',
-    color: Colors.sage,
-  },
-  secLink: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: Colors.ruler,
+    color: Colors.muted,
   },
   hScroll: {
     gap: 10,
-    paddingVertical: 2,
+    paddingVertical: 4,
   },
-  tplCard: {
+  sampleCard: {
     width: 104,
-    backgroundColor: Colors.paper,
-    borderWidth: 2,
-    borderColor: Colors.ink,
-    borderRadius: 15,
-    paddingVertical: 9,
-    paddingHorizontal: 6,
+    backgroundColor: Colors.white,
+    borderRadius: 22,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 2, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 0,
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
     elevation: 4,
   },
-  tplSvgWrap: {
-    width: 54,
-    height: 54,
+  sampleIconBg: {
+    width: 66,
+    height: 66,
+    borderRadius: 18,
+    backgroundColor: Colors.softSky,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+    marginBottom: 6,
   },
-  tplTitle: {
+  sampleTitle: {
     fontSize: 12.5,
     fontWeight: '800',
     color: Colors.ink,
   },
-  tplSub: {
-    fontSize: 10,
+  sampleMeta: {
+    fontSize: 10.5,
+    fontWeight: '600',
     color: Colors.muted,
     marginTop: 1,
   },
-  recentRow: {
+  activityCard: {
+    gap: 14,
+  },
+  activityHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    backgroundColor: Colors.matCardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.matCardBorder,
-    borderRadius: 15,
-    padding: 10,
+    justifyContent: 'space-between',
   },
-  recentThumb: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recentName: {
-    fontSize: 13.5,
+  activityTitle: {
+    fontSize: 16,
     fontWeight: '800',
-    color: Colors.inkOnMat,
+    color: Colors.ink,
   },
-  recentSub: {
-    fontSize: 11,
-    color: Colors.sage,
-    marginTop: 1,
+  activitySub: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: Colors.muted,
   },
-  badge: {
-    backgroundColor: Colors.statusReadyBg,
-    paddingVertical: 4,
-    paddingHorizontal: 9,
+  barsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    height: 112,
+    paddingTop: 20,
+  },
+  barCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 6,
+  },
+  barSlot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  activeCountPill: {
+    position: 'absolute',
+    top: -22,
+    backgroundColor: Colors.fold,
+    paddingVertical: 2,
+    paddingHorizontal: 7,
     borderRadius: 99,
   },
-  badgeText: {
-    fontSize: 10.5,
+  activeCountText: {
+    color: Colors.white,
+    fontSize: 10,
     fontWeight: '800',
-    color: Colors.statusReadyText,
+  },
+  capsuleBar: {
+    width: 22,
+    borderRadius: 11,
+  },
+  dayLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.muted,
+  },
+  dayLabelActive: {
+    color: Colors.fold,
+    fontWeight: '800',
   },
 });

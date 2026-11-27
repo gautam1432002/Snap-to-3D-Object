@@ -8,8 +8,8 @@ interface PaperSheetProps {
 }
 
 /**
- * Tactile `#fdfdfb` off-white craft paper card with `2px solid #17201d` border,
- * `18px` radius, and hard offset shadow matching `.sheet` in the HTML prototype.
+ * Pure-white elevated sunlit studio card (`#FFFFFF`, `borderRadius: 26`,
+ * subtle specular rim, and soft sky-tinted elevation shadow).
  */
 export function PaperSheet({ children, style }: PaperSheetProps) {
   return <View style={[styles.sheet, style]}>{children}</View>;
@@ -17,15 +17,15 @@ export function PaperSheet({ children, style }: PaperSheetProps) {
 
 const styles = StyleSheet.create({
   sheet: {
-    backgroundColor: Colors.paper,
+    backgroundColor: Colors.white,
     borderRadius: Radii.lg,
-    borderWidth: 2,
-    borderColor: Colors.ink,
-    padding: 13,
-    shadowColor: '#000000',
-    shadowOffset: { width: 3, height: 4 },
-    shadowOpacity: 0.34,
-    shadowRadius: 0,
-    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.95)',
+    padding: 16,
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 22,
+    elevation: 6,
   },
 });

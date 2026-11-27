@@ -53,7 +53,7 @@ interface Step4PrintProps {
 }
 
 const FOLD_STEPS = [
-  { num: 1, title: 'Print at 100% Scale', desc: 'Disable "Fit to Page". Verify the yellow scale bar is 5 cm.' },
+  { num: 1, title: 'Print at 100% Scale', desc: 'Disable "Fit to Page". Verify the golden scale bar is 5 cm.' },
   { num: 2, title: 'Cut Solid Red Lines', desc: 'Cut Front, Mirrored Back, Side Strip, and Desk Stand.' },
   { num: 3, title: 'Score Blue Dashed Lines', desc: 'Crease along a ruler before folding the glue tabs 90°.' },
   { num: 4, title: 'Glue Side Strip & Match 1..6', desc: 'Match numbers 1–6 on the strip to the Front, holding 20s per section.' },
@@ -104,7 +104,7 @@ export function Step4Print({
     contour,
   });
 
-  const previewW = 290;
+  const previewW = 286;
   const previewH = Math.round(previewW * (L.pageH / L.pageW));
   const mmToPx = previewW / L.pageW;
 
@@ -171,7 +171,7 @@ export function Step4Print({
 
   return (
     <View style={styles.container}>
-      {/* Clean Non-Clipping Sheet Selector + A4/Letter Pill */}
+      {/* Sheet Switcher + Paper Size Pill */}
       <View style={styles.topBar}>
         <View style={styles.segSwitch}>
           <TouchableOpacity
@@ -211,8 +211,8 @@ export function Step4Print({
         </TouchableOpacity>
       </View>
 
-      {/* Clean Sheet Preview */}
-      <View style={styles.sheetStage}>
+      {/* Pure White Elevated Blueprint Preview Stage */}
+      <PaperSheet style={styles.sheetStage}>
         {sheetIdx === 2 && aiSheetBase64 ? (
           <View style={[styles.paperFrame, { width: previewW, height: previewH, padding: 8 }]}>
             <Image
@@ -240,28 +240,27 @@ export function Step4Print({
                 strokeWidth={0.5}
                 strokeDasharray="3 2"
               />
-              <SvgText x={12} y={15} fontSize="4.6" fontWeight="800" fill="#17201d">
+              <SvgText x={12} y={15} fontSize="4.6" fontWeight="800" fill="#0F2238">
                 {`FOLDLY • ${modelName.toUpperCase()} (${paperSize})`}
               </SvgText>
 
-              {/* 50 mm Calibration Bar */}
               <Rect
                 x={L.pageW - 64}
                 y={11}
                 width={50}
                 height={4.2}
-                fill="#f4c430"
-                stroke="#17201d"
+                fill="#FFB020"
+                stroke="#0F2238"
                 strokeWidth={0.4}
               />
-              <SvgText x={L.pageW - 39} y={19} textAnchor="middle" fontSize="3.2" fontWeight="700" fill="#17201d">
+              <SvgText x={L.pageW - 39} y={19} textAnchor="middle" fontSize="3.2" fontWeight="700" fill="#0F2238">
                 5 cm Scale Check
               </SvgText>
 
               {sheetIdx === 0 ? (
                 <>
-                  <Polygon points={polyStr(fx, fy, false)} fill="none" stroke="#e63946" strokeWidth={0.9} />
-                  <Polygon points={polyStr(bx, fy, true)} fill="none" stroke="#e63946" strokeWidth={0.9} />
+                  <Polygon points={polyStr(fx, fy, false)} fill="none" stroke="#FF5A6E" strokeWidth={0.9} />
+                  <Polygon points={polyStr(bx, fy, true)} fill="none" stroke="#FF5A6E" strokeWidth={0.9} />
                   {gluePins.map((g) => (
                     <G key={g.pair}>
                       <Circle cx={g.fx} cy={g.fy} r={3.8} fill={Colors.fold} stroke="#fff" strokeWidth={0.5} />
@@ -282,7 +281,7 @@ export function Step4Print({
                         width={88}
                         height={36}
                         fill="#f8fafc"
-                        stroke="#e63946"
+                        stroke="#FF5A6E"
                         strokeWidth={0.8}
                       />
                       <Line
@@ -290,11 +289,11 @@ export function Step4Print({
                         y1={L.pageH - 40}
                         x2={(L.pageW + 88) / 2}
                         y2={L.pageH - 40}
-                        stroke="#3b78f0"
+                        stroke="#246BFD"
                         strokeWidth={0.8}
                         strokeDasharray="2.5 1.8"
                       />
-                      <SvgText x={L.pageW / 2} y={L.pageH - 46} textAnchor="middle" fontSize="4" fontWeight="800" fill="#17201d">
+                      <SvgText x={L.pageW / 2} y={L.pageH - 46} textAnchor="middle" fontSize="4" fontWeight="800" fill="#0F2238">
                         DESK STAND
                       </SvgText>
                     </G>
@@ -316,14 +315,14 @@ export function Step4Print({
                             <G key={t}>
                               <Polygon
                                 points={`${tx},${y0} ${tx + 2},${y0 - tabH} ${tx + tw - 2},${y0 - tabH} ${tx + tw},${y0}`}
-                                fill="#fde7e9"
-                                stroke="#e63946"
+                                fill="#FFE4E6"
+                                stroke="#FF5A6E"
                                 strokeWidth={0.5}
                               />
                               <Polygon
                                 points={`${tx},${y0 + stripH} ${tx + 2},${y0 + stripH + tabH} ${tx + tw - 2},${y0 + stripH + tabH} ${tx + tw},${y0 + stripH}`}
-                                fill="#fde7e9"
-                                stroke="#e63946"
+                                fill="#FFE4E6"
+                                stroke="#FF5A6E"
                                 strokeWidth={0.5}
                               />
                             </G>
@@ -334,9 +333,9 @@ export function Step4Print({
                           y={y0}
                           width={drawW}
                           height={stripH}
-                          fill={edgeColorHex || '#2ec4b6'}
-                          fillOpacity={0.26}
-                          stroke="#3b78f0"
+                          fill={edgeColorHex || '#246BFD'}
+                          fillOpacity={0.22}
+                          stroke="#246BFD"
                           strokeWidth={0.7}
                           strokeDasharray="2.5 1.8"
                         />
@@ -352,7 +351,7 @@ export function Step4Print({
             </Svg>
           </View>
         )}
-      </View>
+      </PaperSheet>
 
       {aiSheetWarning && (
         <View style={styles.warnMini}>
@@ -360,53 +359,55 @@ export function Step4Print({
         </View>
       )}
 
-      {/* Compact Optional Gemini AI Sheet Button */}
+      {/* Primary Share PDF CTA */}
       <CraftButton
-        title={isGeneratingSheet ? 'Generating Gemini AI Sheet...' : '✨ Gemini AI Sheet'}
-        variant="teal"
-        small
-        loading={isGeneratingSheet}
-        onPress={async () => {
-          onGenerateAiSheet();
-          setSheetIdx(2);
-        }}
+        title="Share / Save PDF"
+        variant="primary"
+        loading={isSharing}
+        onPress={onShare}
       />
 
-      {/* Primary Action Buttons */}
+      {/* Print & Gemini AI Sheet Row */}
       <View style={styles.btnRow}>
         <CraftButton
-          title="⬇ Share / Save PDF"
-          variant="primary"
-          loading={isSharing}
-          onPress={onShare}
-          style={{ flex: 1 }}
-        />
-        <CraftButton
           title="🖨️ Print Sheet"
-          variant="paper"
+          variant="soft"
+          small
           loading={isPrinting}
           onPress={onPrint}
           style={{ flex: 1 }}
         />
+        <CraftButton
+          title={isGeneratingSheet ? 'Drawing...' : '✨ Gemini AI Sheet'}
+          variant="soft"
+          small
+          loading={isGeneratingSheet}
+          onPress={() => {
+            onGenerateAiSheet();
+            setSheetIdx(2);
+          }}
+          style={{ flex: 1 }}
+        />
       </View>
 
-      {/* Back & Fold Guide Modal Trigger */}
       <View style={styles.btnRow}>
         <CraftButton
           title="‹ Back"
-          variant="alt"
+          variant="soft"
+          small
           onPress={onBack}
           style={{ flex: 0.65 }}
         />
         <CraftButton
           title="📋 Fold Guide & 20s Glue Timer"
-          variant="alt"
+          variant="teal"
+          small
           onPress={() => setGuideOpen(true)}
           style={{ flex: 1.65 }}
         />
       </View>
 
-      {/* Concise 5-Step Fold Guide + 20s Haptic Timer Modal */}
+      {/* Concise 5-Step Fold Guide & 20s Haptic Timer Modal */}
       <Modal
         visible={guideOpen}
         transparent
@@ -423,7 +424,7 @@ export function Step4Print({
             </View>
 
             <ScrollView style={{ maxHeight: 270 }} showsVerticalScrollIndicator={false}>
-              <View style={{ gap: 10 }}>
+              <View style={{ gap: 11 }}>
                 {FOLD_STEPS.map((st) => (
                   <View key={st.num} style={styles.foldStepRow}>
                     <View style={styles.foldStepBadge}>
@@ -446,14 +447,14 @@ export function Step4Print({
                   ? '✅ Bonded! Tap for another 20s'
                   : '⏱️ Start 20s Glue Timer'
               }
-              variant="paper"
+              variant="soft"
               onPress={onStartTimer}
               disabled={isTimerRunning}
-              style={{ borderColor: Colors.fold, backgroundColor: '#e8f0fe' }}
+              style={{ borderColor: Colors.fold, backgroundColor: Colors.softSky }}
             />
 
             <CraftButton
-              title="🎉 Mark Craft Done"
+              title="Mark Craft Done"
               variant="primary"
               onPress={() => {
                 setGuideOpen(false);
@@ -477,40 +478,46 @@ const styles = StyleSheet.create({
   segSwitch: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: 'rgba(16, 38, 32, 0.78)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.matCardBorder,
-    padding: 3,
-    gap: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderRadius: 999,
+    padding: 4,
+    gap: 4,
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
   segTab: {
     flex: 1,
-    paddingVertical: 7,
+    paddingVertical: 8,
     paddingHorizontal: 6,
-    borderRadius: 9,
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
   },
   segTabActive: {
-    backgroundColor: Colors.ruler,
+    backgroundColor: Colors.black,
   },
   segTabText: {
     fontSize: 11.5,
     fontWeight: '700',
-    color: Colors.inkOnMat,
+    color: Colors.muted,
   },
   segTabTextActive: {
-    color: Colors.ink,
+    color: Colors.white,
     fontWeight: '800',
   },
   paperPill: {
-    paddingVertical: 9,
-    paddingHorizontal: 13,
-    borderRadius: 11,
-    backgroundColor: Colors.paper,
-    borderWidth: 1.5,
-    borderColor: Colors.ink,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: Colors.white,
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
   paperPillText: {
     fontSize: 12,
@@ -518,17 +525,17 @@ const styles = StyleSheet.create({
     color: Colors.ink,
   },
   sheetStage: {
-    backgroundColor: '#0d1f1a',
-    borderWidth: 2,
-    borderColor: 'rgba(157, 184, 175, 0.35)',
-    borderRadius: 18,
-    paddingVertical: 12,
+    borderRadius: 28,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   paperFrame: {
-    backgroundColor: '#ffffff',
-    borderRadius: 6,
+    backgroundColor: Colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.softSkyBorder,
     position: 'relative',
     overflow: 'hidden',
   },
@@ -537,16 +544,14 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   warnMini: {
-    backgroundColor: '#fef3c7',
-    borderWidth: 1.2,
-    borderColor: '#f59e0b',
-    borderRadius: 10,
-    padding: 8,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 14,
+    padding: 9,
   },
   warnMiniText: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#78350f',
+    color: '#92400E',
   },
   btnRow: {
     flexDirection: 'row',
@@ -554,14 +559,14 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(8, 20, 16, 0.8)',
+    backgroundColor: 'rgba(15, 34, 56, 0.45)',
     justifyContent: 'flex-end',
     padding: 14,
   },
   modalCard: {
     width: '100%',
     gap: 12,
-    padding: 16,
+    padding: 18,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -594,7 +599,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   foldStepNum: {
-    color: '#ffffff',
+    color: Colors.white,
     fontSize: 12,
     fontWeight: '800',
   },

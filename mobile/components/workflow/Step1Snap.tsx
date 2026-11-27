@@ -10,6 +10,7 @@ import {
 import { SvgXml } from 'react-native-svg';
 import { Camera, Image as ImageIcon } from 'lucide-react-native';
 import { Colors } from '../../constants/theme';
+import { PaperSheet } from '../PaperSheet';
 import { CraftButton } from '../CraftButton';
 import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
 
@@ -41,71 +42,63 @@ export function Step1Snap({
 
   return (
     <View style={styles.container}>
-      {/* Clean Viewfinder Frame */}
-      <View style={styles.viewportBox}>
-        <View style={[styles.corner, styles.cornerTL]} />
-        <View style={[styles.corner, styles.cornerTR]} />
-        <View style={[styles.corner, styles.cornerBL]} />
-        <View style={[styles.corner, styles.cornerBR]} />
+      {/* Bright White Sunlit Viewfinder Stage Card */}
+      <PaperSheet style={styles.stageCard}>
+        <View style={styles.viewportInner}>
+          <View style={[styles.corner, styles.cornerTL]} />
+          <View style={[styles.corner, styles.cornerTR]} />
+          <View style={[styles.corner, styles.cornerBL]} />
+          <View style={[styles.corner, styles.cornerBR]} />
 
-        {capturedUri ? (
-          <Image
-            source={{ uri: capturedUri }}
-            style={styles.previewImage}
-            resizeMode="contain"
-          />
-        ) : (
-          <View style={styles.sampleWrap}>
-            <SvgXml xml={activeSample.svgMarkup} width={175} height={175} />
-            <Text style={styles.sampleLabel}>
-              Sample: {modelName || activeSample.name}
-            </Text>
-          </View>
-        )}
-      </View>
+          {capturedUri ? (
+            <Image
+              source={{ uri: capturedUri }}
+              style={styles.previewImage}
+              resizeMode="contain"
+            />
+          ) : (
+            <View style={styles.sampleWrap}>
+              <SvgXml xml={activeSample.svgMarkup} width={178} height={178} />
+              <View style={styles.samplePill}>
+                <Text style={styles.sampleLabel}>
+                  Sample: {modelName || activeSample.name}
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
+      </PaperSheet>
 
       {capturedUri ? (
-        <View style={styles.confirmBox}>
-          <Text style={styles.hint}>
-            Photo compressed cleanly at 1024px. Ready to lift the cutout!
-          </Text>
-          <View style={styles.btnRow}>
-            <CraftButton
-              title="↺ Retake"
-              variant="alt"
-              onPress={onRetake}
-              style={{ flex: 0.8 }}
-            />
-            <CraftButton
-              title="Lift Cutout →"
-              variant="primary"
-              onPress={onConfirm}
-              style={{ flex: 1.4 }}
-            />
-          </View>
+        <View style={styles.controlsBox}>
+          <CraftButton
+            title="Lift Subject Cutout"
+            variant="primary"
+            onPress={onConfirm}
+          />
+          <CraftButton
+            title="↺ Retake Photo"
+            variant="soft"
+            small
+            onPress={onRetake}
+          />
         </View>
       ) : (
         <View style={styles.controlsBox}>
-          {/* Primary Camera & Gallery Actions */}
-          <View style={styles.btnRow}>
-            <CraftButton
-              title="Take Photo"
-              variant="primary"
-              icon={<Camera size={18} color={Colors.ink} strokeWidth={2.3} />}
-              onPress={onTakePhoto}
-              style={{ flex: 1 }}
-            />
-            <CraftButton
-              title="Choose Photo"
-              variant="paper"
-              icon={<ImageIcon size={18} color={Colors.ink} strokeWidth={2.2} />}
-              onPress={onPickGallery}
-              style={{ flex: 1 }}
-            />
-          </View>
+          <CraftButton
+            title="Take Photo & Lift"
+            variant="primary"
+            icon={<Camera size={18} color={Colors.white} strokeWidth={2.3} />}
+            onPress={onTakePhoto}
+          />
+          <CraftButton
+            title="Choose from Gallery"
+            variant="soft"
+            icon={<ImageIcon size={18} color={Colors.ink} strokeWidth={2.2} />}
+            onPress={onPickGallery}
+          />
 
-          {/* Compact Sample Chips */}
-          <View style={styles.sampleCard}>
+          <PaperSheet style={styles.sampleBox}>
             <Text style={styles.sampleHead}>Or pick an instant sample:</Text>
             <ScrollView
               horizontal
@@ -135,10 +128,10 @@ export function Step1Snap({
                 );
               })}
             </ScrollView>
-          </View>
+          </PaperSheet>
 
           <CraftButton
-            title={`Craft "${activeSample.shortName}" Sample →`}
+            title={`Craft "${activeSample.shortName}" Sample`}
             variant="teal"
             onPress={onConfirm}
           />
@@ -149,13 +142,15 @@ export function Step1Snap({
 }
 
 const styles = StyleSheet.create({
-  container: { gap: 12 },
-  viewportBox: {
-    height: 255,
+  container: { gap: 13 },
+  stageCard: {
+    borderRadius: 28,
+    padding: 12,
+  },
+  viewportInner: {
+    height: 252,
     borderRadius: 20,
-    backgroundColor: '#0d1f1a',
-    borderWidth: 2,
-    borderColor: 'rgba(157, 184, 175, 0.35)',
+    backgroundColor: Colors.softSky,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -166,8 +161,8 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderWidth: 3.5,
-    borderColor: Colors.ruler,
-    borderRadius: 4,
+    borderColor: Colors.fold,
+    borderRadius: 5,
     zIndex: 6,
   },
   cornerTL: { top: 12, left: 12, borderRightWidth: 0, borderBottomWidth: 0 },
@@ -181,57 +176,46 @@ const styles = StyleSheet.create({
   sampleWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  sampleLabel: {
-    color: Colors.sage,
-    fontSize: 11.5,
-    fontWeight: '700',
-    marginTop: 6,
-  },
-  controlsBox: { gap: 11 },
-  confirmBox: { gap: 10 },
-  hint: {
-    fontSize: 12.5,
-    color: Colors.sage,
-    textAlign: 'center',
-  },
-  btnRow: {
-    flexDirection: 'row',
-    gap: 9,
-  },
-  sampleCard: {
-    backgroundColor: Colors.matCardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.matCardBorder,
-    borderRadius: 16,
-    padding: 11,
     gap: 8,
   },
+  samplePill: {
+    backgroundColor: Colors.white,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+  },
+  sampleLabel: {
+    color: Colors.ink,
+    fontSize: 11.5,
+    fontWeight: '800',
+  },
+  controlsBox: { gap: 10 },
+  sampleBox: {
+    padding: 13,
+    gap: 9,
+  },
   sampleHead: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.inkOnMat,
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: Colors.ink,
   },
   chipRow: { gap: 8 },
   chip: {
     paddingVertical: 7,
     paddingHorizontal: 13,
-    borderRadius: 99,
-    borderWidth: 1.5,
-    borderColor: 'rgba(157, 184, 175, 0.4)',
-    backgroundColor: 'rgba(16, 38, 32, 0.72)',
+    borderRadius: 999,
+    backgroundColor: Colors.softSky,
   },
   chipActive: {
-    backgroundColor: Colors.ruler,
-    borderColor: Colors.ink,
+    backgroundColor: Colors.black,
   },
   chipText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: Colors.inkOnMat,
+    fontWeight: '700',
+    color: Colors.ink,
   },
   chipTextActive: {
-    color: Colors.ink,
+    color: Colors.white,
     fontWeight: '800',
   },
 });

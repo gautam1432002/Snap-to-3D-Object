@@ -3,11 +3,13 @@ import {
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Platform,
   LayoutChangeEvent,
 } from 'react-native';
 import { BottomTabBarProps } from 'expo-router/tabs';
+import { useRouter } from 'expo-router';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,8 +17,11 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withSequence,
+  withTiming,
 } from 'react-native-reanimated';
-import { Home, Layers, Settings } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { Home, Archive, SlidersHorizontal, Camera } from 'lucide-react-native';
 import { Colors } from '../constants/theme';
 
 interface TabItemConfig {
@@ -29,21 +34,21 @@ const TABS: TabItemConfig[] = [
   {
     name: 'index',
     label: 'Home',
-    icon: (c) => <Home size={20} color={c} strokeWidth={2.2} />,
+    icon: (c) => <Home size={19} color={c} strokeWidth={2.3} />,
   },
   {
     name: 'creations',
-    label: 'Creations',
-    icon: (c) => <Layers size={20} color={c} strokeWidth={2.2} />,
+    label: 'Vault',
+    icon: (c) => <Archive size={19} color={c} strokeWidth={2.3} />,
   },
   {
     name: 'settings',
-    label: 'Settings',
-    icon: (c) => <Settings size={20} color={c} strokeWidth={2.2} />,
+    label: 'Setup',
+    icon: (c) => <SlidersHorizontal size={19} color={c} strokeWidth={2.3} />,
   },
 ];
 
-const SPRING_CONFIG = { damping: 18, stiffness: 180, mass: 0.8 };
+const DROPLET_SPRING = { damping: 16, stiffness: 185, mass: 0.78 };
 
 function AnimatedTabIcon({
   isFocused,
@@ -53,11 +58,11 @@ function AnimatedTabIcon({
   children: React.ReactNode;
 }) {
   const scale = useSharedValue(isFocused ? 1.08 : 1);
-  const translateY = useSharedValue(isFocused ? -1.5 : 0);
+  const translateY = useSharedValue(isFocused ? -1 : 0);
 
   useEffect(() => {
-    scale.value = withSpring(isFocused ? 1.08 : 1, SPRING_CONFIG);
-    translateY.value = withSpring(isFocused ? -1.5 : 0, SPRING_CONFIG);
+    scale.value = withSpring(isFocused ? 1.08 : 1, DROPLET_SPRING);
+    translateY.value = withSpring(isFocused ? -1 : 0, DROPLET_SPRING);
   }, [isFocused]);
 
   const animStyle = useAnimatedStyle(() => ({
@@ -67,10 +72,20 @@ function AnimatedTabIcon({
   return <Animated.View style={[styles.iconContainer, animStyle]}>{children}</Animated.View>;
 }
 
+/**
+ * Fluid iOS 27 Frosted White Liquid Glass Split Dock:
+ * - Left 3-tab frosted white capsule with elastic Jet-Black droplet indicator
+ * - Right detached floating dark-obsidian Camera Scan Orb
+ */
 export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [rowWidth, setRowWidth] = useState<number>(0);
+
   const indicatorX = useSharedValue(0);
+  const squishX = useSharedValue(1);
+  const squishY = useSharedValue(1);
+  const orbScale = useSharedValue(1);
 
   const activeRouteName = state.routes[state.index]?.name || 'index';
   const activeVisualIdx = Math.max(
@@ -81,11 +96,27 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
 
   useEffect(() => {
     if (tabWidth <= 0) return;
-    indicatorX.value = withSpring(activeVisualIdx * tabWidth, SPRING_CONFIG);
+    indicatorX.value = withSpring(activeVisualIdx * tabWidth, DROPLET_SPRING);
+    squishX.value = withSequence(
+      withTiming(1.18, { duration: 110 }),
+      withSpring(1, { damping: 14, stiffness: 220 })
+    );
+    squishY.value = withSequence(
+      withTiming(0.88, { duration: 110 }),
+      withSpring(1, { damping: 14, stiffness: 220 })
+    );
   }, [activeVisualIdx, tabWidth]);
 
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: indicatorX.value }],
+  const dropletStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: indicatorX.value },
+      { scaleX: squishX.value },
+      { scaleY: squishY.value },
+    ],
+  }));
+
+  const orbAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: orbScale.value }],
   }));
 
   const handleLayout = (e: LayoutChangeEvent) => {
@@ -99,56 +130,41 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
   return (
     <View
       style={[
-        styles.floatingContainer,
+        styles.dockRow,
         { bottom: Math.max(insets.bottom, 10) + 6 },
       ]}
       pointerEvents="box-none"
     >
-      <View style={styles.glassWrapper}>
+      {/* Left Frosted White 3-Tab Capsule */}
+      <View style={styles.capsuleShell}>
         <BlurView
-          intensity={Platform.OS === 'ios' ? 45 : 32}
-          tint="dark"
+          intensity={Platform.OS === 'ios' ? 55 : 42}
+          tint="light"
           style={StyleSheet.absoluteFill}
-        >
-          <LinearGradient
-            colors={[
-              'rgba(16, 38, 32, 0.84)',
-              'rgba(27, 58, 49, 0.72)',
-              'rgba(16, 38, 32, 0.90)',
-            ]}
-            style={StyleSheet.absoluteFill}
-          />
-        </BlurView>
+        />
+        <View style={styles.frostedOverlay} pointerEvents="none" />
 
         <View style={styles.tabsRow} onLayout={handleLayout}>
           {tabWidth > 0 && (
             <Animated.View
               pointerEvents="none"
               style={[
-                styles.slidingGlassPill,
+                styles.jetDroplet,
                 { width: tabWidth },
-                indicatorStyle,
+                dropletStyle,
               ]}
-            >
-              <LinearGradient
-                colors={[
-                  'rgba(255, 255, 255, 0.34)',
-                  'rgba(157, 184, 175, 0.18)',
-                  'rgba(255, 255, 255, 0.12)',
-                ]}
-                style={StyleSheet.absoluteFill}
-              />
-            </Animated.View>
+            />
           )}
 
           {TABS.map((tab) => {
             const routeIdx = state.routes.findIndex((r) => r.name === tab.name);
             const route = routeIdx >= 0 ? state.routes[routeIdx] : undefined;
             const isFocused = routeIdx === state.index;
-            const iconColor = isFocused ? Colors.ruler : Colors.sage;
+            const iconColor = isFocused ? Colors.white : '#475569';
 
             const onPress = () => {
               if (!route) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { });
               const event = emitter.emit({
                 type: 'tabPress',
                 target: route.key,
@@ -163,7 +179,7 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
               <TouchableOpacity
                 key={tab.name}
                 onPress={onPress}
-                activeOpacity={0.78}
+                activeOpacity={0.8}
                 style={styles.tabButton}
               >
                 <AnimatedTabIcon isFocused={isFocused}>
@@ -182,69 +198,125 @@ export function GlassTabBar({ state, emitter, navigateToTab }: BottomTabBarProps
           })}
         </View>
       </View>
+
+      {/* Right Detached Floating Dark-Obsidian Scan Orb */}
+      <Animated.View style={orbAnimStyle}>
+        <Pressable
+          onPress={() => router.push('/workflow')}
+          onPressIn={() => {
+            orbScale.value = withSpring(0.92, { damping: 14, stiffness: 280 });
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => { });
+          }}
+          onPressOut={() => {
+            orbScale.value = withSpring(1, { damping: 14, stiffness: 240 });
+          }}
+          style={styles.scanOrb}
+          accessibilityLabel="Scan Real Object"
+        >
+          <LinearGradient
+            colors={['#273244', '#0F172A']}
+            start={{ x: 0.1, y: 0 }}
+            end={{ x: 0.9, y: 1 }}
+            style={styles.orbGradient}
+          >
+            <Camera size={25} color={Colors.white} strokeWidth={2.2} />
+          </LinearGradient>
+        </Pressable>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  floatingContainer: {
+  dockRow: {
     position: 'absolute',
     left: 16,
     right: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  glassWrapper: {
-    width: '100%',
-    borderRadius: 26,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    backgroundColor: Colors.glassNav,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.44,
-    shadowRadius: 24,
-    elevation: 16,
-    padding: 6,
-  },
-  tabsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
+  },
+  capsuleShell: {
+    flex: 1,
+    height: 64,
+    borderRadius: 32,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: Colors.glassRim,
+    backgroundColor: Colors.glassWhite,
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    elevation: 12,
+    padding: 5,
+  },
+  frostedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.62)',
+  },
+  tabsRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     position: 'relative',
   },
-  slidingGlassPill: {
+  jetDroplet: {
     position: 'absolute',
     top: 0,
     bottom: 0,
     left: 0,
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.45)',
+    borderRadius: 27,
+    backgroundColor: Colors.black,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    elevation: 4,
   },
   tabButton: {
     flex: 1,
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 7,
-    borderRadius: 18,
+    borderRadius: 27,
     zIndex: 2,
   },
   iconContainer: {
-    marginBottom: 3,
+    marginBottom: 2,
   },
   tabLabel: {
-    fontSize: 11,
-    letterSpacing: 0.2,
+    fontSize: 10.5,
+    letterSpacing: 0.1,
   },
   activeTabLabel: {
-    color: '#ffffff',
+    color: Colors.white,
     fontWeight: '800',
   },
   inactiveTabLabel: {
-    color: Colors.sage,
-    fontWeight: '600',
+    color: '#475569',
+    fontWeight: '700',
+  },
+  scanOrb: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: Colors.glassRim,
+    overflow: 'hidden',
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.26,
+    shadowRadius: 16,
+    elevation: 14,
+  },
+  orbGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

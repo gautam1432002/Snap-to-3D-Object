@@ -108,7 +108,7 @@ export function CraftSlider({
           <View
             style={[
               styles.thumb,
-              { left: Math.max(0, Math.min(trackWidth - 20, pct * (trackWidth - 20))) },
+              { left: Math.max(0, Math.min(trackWidth - 22, pct * (trackWidth - 22))) },
             ]}
           />
         </View>
@@ -127,7 +127,7 @@ export function CraftSlider({
 
 const styles = StyleSheet.create({
   container: {
-    gap: 5,
+    gap: 6,
   },
   topRow: {
     flexDirection: 'row',
@@ -135,15 +135,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   label: {
-    fontSize: 12.5,
+    fontSize: 13,
     fontWeight: '700',
     color: Colors.ink,
   },
   badge: {
-    backgroundColor: '#e8f0fe',
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    borderRadius: 8,
+    backgroundColor: Colors.softSky,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    borderRadius: 99,
   },
   badgeText: {
     color: Colors.fold,
@@ -156,12 +156,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   stepBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#edf2f0',
-    borderWidth: 1.5,
-    borderColor: '#cbd5d1',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: Colors.softSky,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -173,14 +171,14 @@ const styles = StyleSheet.create({
   },
   trackTouch: {
     flex: 1,
-    height: 28,
+    height: 30,
     justifyContent: 'center',
     position: 'relative',
   },
   trackBg: {
-    height: 7,
+    height: 8,
     borderRadius: 99,
-    backgroundColor: '#dbe5e1',
+    backgroundColor: '#E2EFFA',
     overflow: 'hidden',
   },
   trackFill: {
@@ -190,12 +188,17 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: Colors.ruler,
-    borderWidth: 2,
-    borderColor: Colors.ink,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.black,
+    borderWidth: 3,
+    borderColor: Colors.white,
     top: 4,
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
   },
 });

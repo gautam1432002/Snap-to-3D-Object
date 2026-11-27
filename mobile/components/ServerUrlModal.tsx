@@ -64,7 +64,7 @@ export function ServerUrlModal({ visible, onClose, onSaved }: ServerUrlModalProp
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <PaperSheet style={styles.card}>
-          <Text style={styles.title}>Backend Server URL</Text>
+          <Text style={styles.title}>Backend Vision Server</Text>
           <Text style={styles.sub}>
             Set your PC's Wi-Fi IPv4 address (with FastAPI running on port 8000).
           </Text>
@@ -91,7 +91,7 @@ export function ServerUrlModal({ visible, onClose, onSaved }: ServerUrlModalProp
           <View style={styles.btnRow}>
             <CraftButton
               title="Reset"
-              variant="paper"
+              variant="soft"
               small
               onPress={handleReset}
               style={{ flex: 0.7 }}
@@ -122,7 +122,7 @@ export function ServerUrlModal({ visible, onClose, onSaved }: ServerUrlModalProp
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(8, 20, 16, 0.78)',
+    backgroundColor: 'rgba(15, 34, 56, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 350,
-    padding: 16,
+    padding: 18,
   },
   title: {
     fontSize: 18,
@@ -138,45 +138,42 @@ const styles = StyleSheet.create({
     color: Colors.ink,
   },
   sub: {
-    fontSize: 12,
+    fontSize: 12.5,
     color: Colors.muted,
     marginTop: 4,
-    marginBottom: 10,
-    lineHeight: 17,
+    marginBottom: 12,
+    lineHeight: 18,
   },
   input: {
     width: '100%',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: '#cbd5d1',
-    backgroundColor: '#ffffff',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.softSkyBorder,
+    backgroundColor: Colors.softSky,
     color: Colors.ink,
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '600',
     marginBottom: 10,
   },
   statusBox: {
-    padding: 8,
-    borderRadius: 10,
-    borderWidth: 1.2,
+    padding: 9,
+    borderRadius: 12,
     marginBottom: 10,
   },
   statusOk: {
-    backgroundColor: '#d4f5ee',
-    borderColor: Colors.teal,
+    backgroundColor: '#DCFCE7',
   },
   statusErr: {
-    backgroundColor: '#fee2e2',
-    borderColor: Colors.cut,
+    backgroundColor: Colors.dangerBg,
   },
   statusText: {
-    fontSize: 11.5,
+    fontSize: 12,
     fontWeight: '700',
   },
-  textOk: { color: '#0f5c52' },
-  textErr: { color: '#991b1b' },
+  textOk: { color: '#166534' },
+  textErr: { color: Colors.dangerText },
   btnRow: {
     flexDirection: 'row',
     gap: 8,

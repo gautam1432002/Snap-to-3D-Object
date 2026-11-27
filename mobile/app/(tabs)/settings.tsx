@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, Typography } from '../../constants/theme';
+import { Colors } from '../../constants/theme';
 import { CuttingMatBackground } from '../../components/CuttingMatBackground';
 import { PaperSheet } from '../../components/PaperSheet';
 import { CraftButton } from '../../components/CraftButton';
@@ -29,7 +29,7 @@ import {
   UserStats,
 } from '../../services/storage';
 
-export default function SettingsScreen() {
+export default function SetupScreen() {
   const insets = useSafeAreaInsets();
   const [urlInput, setUrlInput] = useState('');
   const [testing, setTesting] = useState(false);
@@ -119,21 +119,18 @@ export default function SettingsScreen() {
           styles.scrollContent,
           {
             paddingTop: Math.max(insets.top, 28) + 8,
-            paddingBottom: Math.max(insets.bottom, 14) + 96,
+            paddingBottom: Math.max(insets.bottom, 16) + 102,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <View>
-          <Text style={styles.hand}>studio config</Text>
-          <Text style={styles.title}>Settings</Text>
-        </View>
+        <Text style={styles.setupTitle}>Studio Setup</Text>
 
-        {/* Backend Server URL Card */}
+        {/* Backend Vision Server Card */}
         <PaperSheet style={styles.card}>
-          <Text style={styles.cardHeading}>🔌 Backend Server URL</Text>
+          <Text style={styles.cardHeading}>🔌 Backend Vision Server URL</Text>
           <Text style={styles.cardSub}>
-            Enter your PC's Wi-Fi IP address with FastAPI running on port 8000.
+            Enter your PC's Wi-Fi IPv4 address running FastAPI on port 8000.
           </Text>
           <TextInput
             value={urlInput}
@@ -152,30 +149,25 @@ export default function SettingsScreen() {
               </Text>
             </View>
           )}
-          <View style={styles.btnRow}>
-            <CraftButton
-              title="Reset"
-              variant="paper"
-              small
-              onPress={handleResetUrl}
-              style={{ flex: 0.7 }}
-            />
-            <CraftButton
-              title={testing ? 'Testing...' : 'Test Connection'}
-              variant="teal"
-              small
-              loading={testing}
-              onPress={handleTestConnection}
-              style={{ flex: 1.4 }}
-            />
-          </View>
+          <CraftButton
+            title={testing ? 'Testing...' : 'Test Connection'}
+            variant="primary"
+            loading={testing}
+            onPress={handleTestConnection}
+          />
+          <CraftButton
+            title="Reset to Default IP"
+            variant="soft"
+            small
+            onPress={handleResetUrl}
+          />
         </PaperSheet>
 
         {/* Paper Size Card */}
         <PaperSheet style={styles.paperRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardHeading}>📄 Printing Paper</Text>
-            <Text style={styles.cardSub}>Used for exact-scale PDF export</Text>
+            <Text style={styles.cardHeading}>📄 Paper Format</Text>
+            <Text style={styles.cardSub}>Scale for exported PDF sheets</Text>
           </View>
           <View style={styles.segBtns}>
             {(['A4', 'Letter'] as const).map((sz) => {
@@ -195,13 +187,15 @@ export default function SettingsScreen() {
           </View>
         </PaperSheet>
 
-        {/* Compact Stats & Badges Card */}
-        <View style={styles.matCard}>
+        {/* Maker Badges Card */}
+        <PaperSheet style={styles.card}>
           <View style={styles.statsHead}>
-            <Text style={styles.statsTitle}>🎨 Maker Stats & Badges</Text>
-            <Text style={styles.handSmall}>{unlockedCount} / 4</Text>
+            <Text style={styles.cardHeading}>🏆 Maker Badges</Text>
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{unlockedCount} / 4</Text>
+            </View>
           </View>
-          <Text style={styles.statsSub}>
+          <Text style={styles.cardSub}>
             {stats.objectsScanned} objects scanned • {builtCount} crafts built
           </Text>
 
@@ -219,7 +213,7 @@ export default function SettingsScreen() {
               );
             })}
           </View>
-        </View>
+        </PaperSheet>
       </ScrollView>
     </CuttingMatBackground>
   );
@@ -230,22 +224,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 14,
   },
-  hand: {
-    ...Typography.handwritten,
-    fontSize: 20,
-  },
-  handSmall: {
-    ...Typography.handwritten,
-    fontSize: 18,
-  },
-  title: {
-    ...Typography.title1,
+  setupTitle: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: Colors.white,
+    textShadowColor: 'rgba(36, 107, 253, 0.45)',
+    textShadowOffset: { width: 0, height: 3 },
+    textShadowRadius: 8,
+    letterSpacing: -0.5,
   },
   card: {
-    gap: 9,
+    gap: 10,
   },
   cardHeading: {
-    fontSize: 15,
+    fontSize: 15.5,
     fontWeight: '800',
     color: Colors.ink,
   },
@@ -255,30 +247,25 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   input: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: '#cbd5d1',
-    backgroundColor: '#ffffff',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.softSkyBorder,
+    backgroundColor: Colors.softSky,
     color: Colors.ink,
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '600',
   },
   statusBox: {
-    padding: 8,
-    borderRadius: 10,
-    borderWidth: 1.2,
+    padding: 9,
+    borderRadius: 12,
   },
-  statusOk: { backgroundColor: '#d4f5ee', borderColor: Colors.teal },
-  statusErr: { backgroundColor: '#fee2e2', borderColor: Colors.cut },
-  statusText: { fontSize: 11.5, fontWeight: '700' },
-  textOk: { color: '#0f5c52' },
-  textErr: { color: '#991b1b' },
-  btnRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
+  statusOk: { backgroundColor: '#DCFCE7' },
+  statusErr: { backgroundColor: Colors.dangerBg },
+  statusText: { fontSize: 12, fontWeight: '700' },
+  textOk: { color: '#166534' },
+  textErr: { color: Colors.dangerText },
   paperRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -288,73 +275,66 @@ const styles = StyleSheet.create({
   segBtns: {
     flexDirection: 'row',
     gap: 5,
-    width: 132,
+    backgroundColor: Colors.softSky,
+    padding: 4,
+    borderRadius: 999,
+    width: 142,
   },
   segBtn: {
     flex: 1,
     paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#c8d3cf',
-    backgroundColor: '#ffffff',
+    borderRadius: 999,
     alignItems: 'center',
   },
   segBtnActive: {
-    backgroundColor: Colors.ink,
-    borderColor: Colors.ink,
+    backgroundColor: Colors.black,
   },
   segText: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.ink,
+    color: Colors.muted,
   },
   segTextActive: {
-    color: Colors.ruler,
-  },
-  matCard: {
-    backgroundColor: Colors.matCardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.matCardBorder,
-    borderRadius: 17,
-    padding: 13,
-    gap: 8,
+    color: Colors.white,
+    fontWeight: '800',
   },
   statsHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  statsTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: Colors.inkOnMat,
+  countPill: {
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    borderRadius: 99,
   },
-  statsSub: {
-    fontSize: 12,
-    color: Colors.sage,
+  countPillText: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#B45309',
   },
   badgeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 4,
+    gap: 9,
+    marginTop: 2,
   },
   badgeItem: {
-    width: '48.5%',
-    borderRadius: 13,
-    paddingVertical: 10,
+    width: '48.3%',
+    borderRadius: 18,
+    paddingVertical: 12,
     paddingHorizontal: 8,
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 38, 32, 0.72)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(157, 184, 175, 0.25)',
-    opacity: 0.55,
+    backgroundColor: Colors.softSky,
+    opacity: 0.52,
   },
   badgeUnlocked: {
     opacity: 1,
-    borderColor: Colors.ruler,
-    backgroundColor: 'rgba(244, 196, 48, 0.14)',
+    backgroundColor: '#FEF9C3',
+    borderWidth: 1.5,
+    borderColor: Colors.gold,
   },
-  badgeEm: { fontSize: 22, marginBottom: 3 },
-  badgeTitle: { fontSize: 12, fontWeight: '800', color: Colors.inkOnMat },
+  badgeEm: { fontSize: 24, marginBottom: 4 },
+  badgeTitle: { fontSize: 12, fontWeight: '800', color: Colors.ink },
 });

@@ -13,32 +13,35 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SvgXml } from 'react-native-svg';
 import { Trash2 } from 'lucide-react-native';
-import { Colors, Typography } from '../../constants/theme';
+import { Colors } from '../../constants/theme';
 import { CuttingMatBackground } from '../../components/CuttingMatBackground';
 import { PaperSheet } from '../../components/PaperSheet';
 import { CraftButton } from '../../components/CraftButton';
 import {
   CreationItem,
   deleteCreation,
+  getPaperPreference,
   getSavedCreations,
 } from '../../services/storage';
 import { SAMPLE_TEMPLATES } from '../../utils/sampleTemplates';
 
-export default function CreationsScreen() {
+export default function VaultScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [creations, setCreations] = useState<CreationItem[]>([]);
+  const [paperPref, setPaperPref] = useState<'A4' | 'Letter'>('A4');
   const [pendingDelete, setPendingDelete] = useState<CreationItem | null>(null);
 
-  const loadCreations = useCallback(async () => {
-    const list = await getSavedCreations();
+  const loadVault = useCallback(async () => {
+    const [list, pref] = await Promise.all([getSavedCreations(), getPaperPreference()]);
     setCreations(list);
+    setPaperPref(pref);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadCreations();
-    }, [loadCreations])
+      loadVault();
+    }, [loadVault])
   );
 
   const confirmDelete = async () => {
@@ -58,6 +61,8 @@ export default function CreationsScreen() {
     });
   };
 
+  const builtCount = creations.filter((c) => c.status === 'Built').length;
+
   return (
     <CuttingMatBackground>
       <ScrollView
@@ -65,29 +70,32 @@ export default function CreationsScreen() {
           styles.scrollContent,
           {
             paddingTop: Math.max(insets.top, 28) + 8,
-            paddingBottom: Math.max(insets.bottom, 14) + 96,
+            paddingBottom: Math.max(insets.bottom, 16) + 102,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.secHead}>
-          <View>
-            <Text style={styles.hand}>your craft bench</Text>
-            <Text style={styles.title}>Creations</Text>
+        <Text style={styles.vaultTitle}>Craft Vault</Text>
+
+        {/* 3 Crisp White Summary Pills */}
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryText}>📦 {creations.length} Saved</Text>
           </View>
-          <CraftButton
-            title="+ Scan New"
-            small
-            onPress={() => router.push('/workflow')}
-          />
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryText}>✅ {builtCount} Built</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryText}>📄 {paperPref}</Text>
+          </View>
         </View>
 
         {creations.length === 0 ? (
           <PaperSheet style={styles.emptyCard}>
-            <Text style={{ fontSize: 38, marginBottom: 8 }}>✂️</Text>
-            <Text style={styles.emptyTitle}>No saved crafts yet</Text>
+            <Text style={{ fontSize: 40, marginBottom: 8 }}>✂️</Text>
+            <Text style={styles.emptyTitle}>Your Craft Vault is empty</Text>
             <Text style={styles.emptyDesc}>
-              Scan a real object or try a sample craft to see your saved 3D models here.
+              Tap the camera orb below to scan any object and save it here!
             </Text>
           </PaperSheet>
         ) : (
@@ -96,6 +104,7 @@ export default function CreationsScreen() {
               const tpl = c.sampleId
                 ? SAMPLE_TEMPLATES[c.sampleId as keyof typeof SAMPLE_TEMPLATES]
                 : null;
+              const isBuilt = c.status === 'Built';
               return (
                 <Animated.View
                   key={c.id}
@@ -112,18 +121,18 @@ export default function CreationsScreen() {
                         style={styles.delBtn}
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       >
-                        <Trash2 size={14} color={Colors.cut} />
+                        <Trash2 size={14} color={Colors.dangerText} />
                       </TouchableOpacity>
 
                       <View style={styles.thumbBox}>
                         {c.trimmedBase64 || c.trimmedUrl ? (
                           <Image
                             source={{ uri: c.trimmedBase64 || c.trimmedUrl || '' }}
-                            style={{ width: 82, height: 82 }}
+                            style={{ width: 84, height: 84 }}
                             resizeMode="contain"
                           />
                         ) : tpl ? (
-                          <SvgXml xml={tpl.svgMarkup} width={82} height={82} />
+                          <SvgXml xml={tpl.svgMarkup} width={84} height={84} />
                         ) : (
                           <Text style={{ fontSize: 34 }}>✂️</Text>
                         )}
@@ -138,14 +147,17 @@ export default function CreationsScreen() {
                         <View
                           style={[
                             styles.statusTag,
-                            c.status === 'Built'
-                              ? styles.tagBuilt
-                              : c.status === 'Building'
-                              ? styles.tagBuilding
-                              : styles.tagReady,
+                            isBuilt ? styles.tagBuilt : styles.tagReady,
                           ]}
                         >
-                          <Text style={styles.statusTagText}>{c.status}</Text>
+                          <Text
+                            style={[
+                              styles.statusTagText,
+                              isBuilt ? styles.textBuilt : styles.textReady,
+                            ]}
+                          >
+                            {c.status}
+                          </Text>
                         </View>
                       </View>
                     </PaperSheet>
@@ -169,18 +181,20 @@ export default function CreationsScreen() {
             <Text style={{ fontSize: 34, marginBottom: 6 }}>🗑️</Text>
             <Text style={styles.modalTitle}>Delete this craft?</Text>
             <Text style={styles.modalDesc}>
-              Remove "{pendingDelete?.name}" from your saved creations?
+              Remove "{pendingDelete?.name}" from your Craft Vault?
             </Text>
             <View style={styles.modalBtnRow}>
               <CraftButton
                 title="Cancel"
-                variant="paper"
+                variant="soft"
+                small
                 onPress={() => setPendingDelete(null)}
                 style={{ flex: 1 }}
               />
               <CraftButton
                 title="Delete"
                 variant="danger"
+                small
                 onPress={confirmDelete}
                 style={{ flex: 1 }}
               />
@@ -197,25 +211,44 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 14,
   },
-  secHead: {
+  vaultTitle: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: Colors.white,
+    textShadowColor: 'rgba(36, 107, 253, 0.45)',
+    textShadowOffset: { width: 0, height: 3 },
+    textShadowRadius: 8,
+    letterSpacing: -0.5,
+  },
+  summaryRow: {
     flexDirection: 'row',
+    gap: 8,
+  },
+  summaryPill: {
+    flex: 1,
+    backgroundColor: Colors.white,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 999,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
-  hand: {
-    ...Typography.handwritten,
-    fontSize: 20,
-  },
-  title: {
-    ...Typography.title1,
+  summaryText: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: Colors.ink,
   },
   emptyCard: {
     alignItems: 'center',
-    paddingVertical: 28,
-    paddingHorizontal: 16,
+    paddingVertical: 30,
+    paddingHorizontal: 18,
   },
   emptyTitle: {
-    fontSize: 16,
+    fontSize: 16.5,
     fontWeight: '800',
     color: Colors.ink,
   },
@@ -230,37 +263,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 11,
   },
   gridItem: {
     width: '48.2%',
   },
   card: {
-    padding: 10,
-    gap: 7,
+    padding: 11,
+    gap: 8,
     position: 'relative',
   },
   delBtn: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 9,
+    right: 9,
     zIndex: 4,
-    padding: 5,
+    padding: 6,
     borderRadius: 99,
-    backgroundColor: '#fee2e2',
+    backgroundColor: Colors.dangerBg,
   },
   thumbBox: {
-    height: 98,
-    borderRadius: 12,
-    backgroundColor: '#edf5f1',
-    borderWidth: 1.2,
-    borderStyle: 'dashed',
-    borderColor: '#9db8af',
+    height: 104,
+    borderRadius: 18,
+    backgroundColor: Colors.softSky,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cardTitle: {
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '800',
     color: Colors.ink,
   },
@@ -270,26 +300,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   cardMeta: {
-    fontSize: 11,
+    fontSize: 11.5,
     fontWeight: '700',
     color: Colors.muted,
   },
   statusTag: {
-    paddingVertical: 2,
-    paddingHorizontal: 7,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
     borderRadius: 99,
   },
-  tagReady: { backgroundColor: Colors.statusReadyBg },
-  tagBuilding: { backgroundColor: Colors.medBg },
-  tagBuilt: { backgroundColor: Colors.easyBg },
+  tagReady: { backgroundColor: '#DBEAFE' },
+  tagBuilt: { backgroundColor: '#DCFCE7' },
   statusTagText: {
-    fontSize: 9.5,
+    fontSize: 10,
     fontWeight: '800',
-    color: Colors.ink,
   },
+  textReady: { color: '#1D4ED8' },
+  textBuilt: { color: '#15803D' },
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(8, 20, 16, 0.76)',
+    backgroundColor: 'rgba(15, 34, 56, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,

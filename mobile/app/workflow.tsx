@@ -88,10 +88,6 @@ export default function WorkflowScreen() {
     });
   }, [currentStep]);
 
-  const progressFillStyle = useAnimatedStyle(() => ({
-    width: `${stepProgress.value}%`,
-  }));
-
   const jumpToStep = (next: number) => {
     setNavDir(next >= currentStep ? 'fwd' : 'back');
     setCurrentStep(next);
@@ -512,7 +508,7 @@ export default function WorkflowScreen() {
             onPress={() => (currentStep > 1 ? jumpToStep(currentStep - 1) : router.back())}
             style={styles.iconBtn}
           >
-            <ChevronLeft size={20} color={Colors.inkOnMat} />
+            <ChevronLeft size={20} color={Colors.ink} strokeWidth={2.5} />
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
@@ -522,15 +518,26 @@ export default function WorkflowScreen() {
           </View>
 
           <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
-            <X size={18} color={Colors.inkOnMat} />
+            <X size={18} color={Colors.ink} strokeWidth={2.5} />
           </TouchableOpacity>
         </View>
 
-        {/* Animated 4-Step Progress Bar */}
-        <View style={styles.progressTrackWrap}>
-          <View style={styles.progressTrack}>
-            <Animated.View style={[styles.progressFill, progressFillStyle]} />
-          </View>
+        {/* 4 Bright Progress Bars */}
+        <View style={styles.segmentsRow}>
+          {[1, 2, 3, 4].map((st) => {
+            const isDone = st < currentStep;
+            const isActive = st === currentStep;
+            return (
+              <View
+                key={st}
+                style={[
+                  styles.segmentBar,
+                  isDone && styles.segmentDone,
+                  isActive && styles.segmentActive,
+                ]}
+              />
+            );
+          })}
         </View>
 
         <ScrollView
@@ -661,38 +668,44 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: 'rgba(16, 38, 32, 0.72)',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: Colors.skyShadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 4,
   },
   headerCenter: {
     flex: 1,
     alignItems: 'center',
   },
   wfTitle: {
-    fontSize: 17.5,
+    fontSize: 18,
     fontWeight: '800',
-    color: Colors.inkOnMat,
+    color: Colors.ink,
   },
-  progressTrackWrap: {
-    paddingHorizontal: 15,
-    paddingBottom: 12,
+  segmentsRow: {
+    flexDirection: 'row',
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
   },
-  progressTrack: {
+  segmentBar: {
+    flex: 1,
     height: 6,
-    borderRadius: 99,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    overflow: 'hidden',
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.58)',
   },
-  progressFill: {
-    height: '100%',
-    borderRadius: 99,
-    backgroundColor: Colors.ruler,
+  segmentDone: {
+    backgroundColor: '#22C55E',
+  },
+  segmentActive: {
+    backgroundColor: Colors.fold,
   },
   scrollBody: {
     paddingHorizontal: 15,

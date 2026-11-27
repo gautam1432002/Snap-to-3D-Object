@@ -34,7 +34,7 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: #0d1f1a;
+    background: linear-gradient(180deg, #EAF6FF 0%, #FFFFFF 100%);
     touch-action: none;
     user-select: none;
     font-family: system-ui, -apple-system, sans-serif;
@@ -47,7 +47,7 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
     align-items: center;
     justify-content: center;
     text-align: center;
-    color: #9db8af;
+    color: #64748B;
     font-size: 13px;
     padding: 20px;
   }
@@ -82,40 +82,47 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
   var camera = new THREE.PerspectiveCamera(36, w / h, 0.1, 100);
   camera.position.set(0, 0.45, 7.6);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
-  var dir1 = new THREE.DirectionalLight(0xffffff, 0.55);
-  dir1.position.set(3, 5, 6);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.12));
+  var dir1 = new THREE.DirectionalLight(0xffffff, 0.52);
+  dir1.position.set(3, 6, 6);
   scene.add(dir1);
-  var dir2 = new THREE.DirectionalLight(0xeef6f2, 0.4);
-  dir2.position.set(-4, 2, -5);
+  var dir2 = new THREE.DirectionalLight(0xEAF6FF, 0.42);
+  dir2.position.set(-4, 3, -4);
   scene.add(dir2);
 
-  // Green cutting-mat turntable pedestal
+  // Bright daylight white-and-sky circular studio turntable
   var disc = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.75, 1.85, 0.11, 44),
-    new THREE.MeshStandardMaterial({ color: 0x24493e, roughness: 0.85 })
+    new THREE.CylinderGeometry(1.76, 1.86, 0.11, 48),
+    new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.38, metalness: 0.04 })
   );
   disc.position.y = -1.62;
   scene.add(disc);
 
-  // Soft contact shadow ellipse on turntable
+  var discRim = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.62, 1.62, 0.015, 48),
+    new THREE.MeshBasicMaterial({ color: 0xD8EEFF })
+  );
+  discRim.position.y = -1.56;
+  scene.add(discRim);
+
+  // Soft natural cool-navy contact shadow ellipse
   var shadowMesh = (function() {
     var sc = document.createElement('canvas');
     sc.width = 256; sc.height = 256;
     var sctx = sc.getContext('2d');
-    var g = sctx.createRadialGradient(128, 128, 10, 128, 128, 122);
-    g.addColorStop(0, 'rgba(6, 18, 14, 0.54)');
-    g.addColorStop(0.55, 'rgba(6, 18, 14, 0.22)');
-    g.addColorStop(1, 'rgba(6, 18, 14, 0.0)');
+    var g = sctx.createRadialGradient(128, 128, 12, 128, 128, 120);
+    g.addColorStop(0, 'rgba(15, 34, 56, 0.22)');
+    g.addColorStop(0.55, 'rgba(15, 34, 56, 0.09)');
+    g.addColorStop(1, 'rgba(15, 34, 56, 0.0)');
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, 256, 256);
     var stex = new THREE.CanvasTexture(sc);
     var mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.4, 1.35),
+      new THREE.PlaneGeometry(2.35, 1.3),
       new THREE.MeshBasicMaterial({ map: stex, transparent: true, depthWrite: false })
     );
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = -1.555;
+    mesh.position.y = -1.548;
     return mesh;
   })();
   scene.add(shadowMesh);
@@ -335,6 +342,7 @@ export function buildStudio3DHtml(initial: Studio3DPayload): string {
 
     var matVisible = t < 0.15;
     disc.visible = matVisible;
+    discRim.visible = matVisible;
     shadowMesh.visible = matVisible;
     if (matVisible) {
       var shScale = Math.max(0.65, (modelMetrics.modelW * currentScale) / 2.0);

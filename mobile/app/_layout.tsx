@@ -7,11 +7,11 @@ import { Colors } from '../constants/theme';
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: Colors.bg },
+          contentStyle: { backgroundColor: Colors.skyMid },
           animation: 'fade',
         }}
       >
